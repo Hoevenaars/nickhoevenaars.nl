@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nick Hoevenaars</title>
+
+  <!-- ===========================================================
+       LETTERTYPEN
+       Space Grotesk voor de koppen (stevig, eigenwijs),
+       Inter voor de lopende tekst (rustig, leesbaar).
+       =========================================================== -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ===========================================================
+       1. DESIGN TOKENS
+       Pas hier kleuren, lettertypen en maten centraal aan.
+       Verander je hier iets, dan verandert het op de hele site.
+       =========================================================== */
+    :root {
+      --bg:        #0E0E0F;   /* achtergrond, bijna zwart */
+      --surface:   #161617;   /* iets lichter vlak voor kaarten */
+      --ink:       #F5F4F0;   /* hoofdtekst, gebroken wit */
+      --mid:       #8A8A85;   /* secundaire tekst, grijs */
+      --line:      #2A2A2C;   /* lijnen en randen */
+      --accent:    #C6FF3A;   /* signaalkleur, fel limegroen */
+
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-body:    'Inter', system-ui, sans-serif;
+
+      --maxw: 880px;          /* maximale breedte van de content */
+    }
+
+    /* ===========================================================
+       2. BASIS / RESET
+       =========================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-weight: 300;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; }
+
+    .wrap {
+      width: 100%;
+      max-width: var(--maxw);
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ===========================================================
+       3. HEADER / NAVIGATIE
+       Nu alleen je naam. Voeg later links toe in de <nav>
+       om naar nieuwe secties te springen (bv. #over, #werk).
+       =========================================================== */
+    .site-header {
+      padding: 1.6rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .site-header .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 0.02em;
+    }
+    .logo span { color: var(--accent); }
+
+    nav {
+      display: flex;
+      gap: 1.6rem;
+      font-size: 0.85rem;
+      color: var(--mid);
+    }
+    nav a {
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    nav a:hover { color: var(--ink); }
+
+    /* ===========================================================
+       4. HERO
+       Het eerste wat je ziet: je naam groot, een korte regel,
+       en de LinkedIn knop.
+       =========================================================== */
+    .hero {
+      flex: 1;                 /* duwt de footer naar onderen */
+      display: flex;
+      align-items: center;
+      padding: 5rem 0;
+    }
+
+    .eyebrow {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: clamp(3rem, 11vw, 7rem);
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.6rem;
+    }
+
+    .hero p.lead {
+      font-size: clamp(1rem, 2.5vw, 1.25rem);
+      color: var(--mid);
+      max-width: 30ch;
+      margin-bottom: 2.8rem;
+    }
+
+    /* De LinkedIn knop */
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: var(--accent);
+      color: #0E0E0F;
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 0.95rem;
+      text-decoration: none;
+      padding: 0.85rem 1.4rem;
+      border-radius: 100px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(198, 255, 58, 0.25);
+    }
+    .cta svg { flex-shrink: 0; }
+
+    /* ===========================================================
+       5. FOOTER
+       =========================================================== */
+    .site-footer {
+      border-top: 1px solid var(--line);
+      padding: 1.6rem 0;
+      font-size: 0.8rem;
+      color: var(--mid);
+    }
+    .site-footer .wrap {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    /* ===========================================================
+       6. HERBRUIKBARE SECTIE STIJL  (voor later)
+       Wil je een nieuwe sectie toevoegen? Kopieer het blok
+       onderaan in de HTML (zie "RUIMTE OM UIT TE BOUWEN")
+       en deze stijl pakt het automatisch op.
+       =========================================================== */
+    .section {
+      padding: 5rem 0;
+      border-top: 1px solid var(--line);
+    }
+    .section h2 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      letter-spacing: -0.02em;
+      margin-bottom: 1.5rem;
+    }
+    .section .label {
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.8rem;
+    }
+    .section p { color: var(--mid); max-width: 60ch; }
+
+    /* ===========================================================
+       7. TOEGANKELIJKHEID / BEWEGING
+       =========================================================== */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .hero > .wrap > * { animation: rise 0.6s ease both; }
+      .hero .eyebrow { animation-delay: 0.05s; }
+      .hero h1       { animation-delay: 0.12s; }
+      .hero .lead    { animation-delay: 0.20s; }
+      .hero .cta     { animation-delay: 0.28s; }
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(16px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ====================== HEADER ====================== -->
+  <header class="site-header">
+    <div class="wrap">
+      <div class="logo">NH<span>.</span></div>
+      <nav>
+        <!-- Voeg hier later links toe, bv:
+             <a href="#over">Over</a>
+             <a href="#werk">Werk</a>
+             <a href="#contact">Contact</a> -->
+      </nav>
+    </div>
+  </header>
+
+  <!-- ====================== HERO ====================== -->
+  <main class="hero">
+    <div class="wrap">
+      <h1>Nick<br>Hoevenaars</h1>
+      <p class="lead">Vind me op LinkedIn.</p>
+
+      <a class="cta"
+         href="https://www.linkedin.com/in/nickhoevenaars"
+         target="_blank" rel="noopener noreferrer">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/>
+        </svg>
+        Bekijk mijn LinkedIn
+      </a>
+    </div>
+  </main>
+
+  <!-- ============================================================
+       RUIMTE OM UIT TE BOUWEN
+       Wil je een nieuwe sectie? Verwijder de comment-tekens
+       rondom het blok hieronder, of kopieer het, en vul het.
+       De opmaak staat al klaar (zie ".section" in de stijl).
+
+  <section class="section" id="over">
+    <div class="wrap">
+      <p class="label">Over</p>
+      <h2>Even voorstellen</h2>
+      <p>Hier komt een korte tekst over wie je bent en wat je doet.</p>
+    </div>
+  </section>
+
+  <section class="section" id="werk">
+    <div class="wrap">
+      <p class="label">Werk</p>
+      <h2>Wat ik maak</h2>
+      <p>Hier kun je projecten of diensten tonen.</p>
+    </div>
+  </section>
+
+       ============================================================ -->
+
+  <!-- ====================== FOOTER ====================== -->
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>&copy; 2026 Nick Hoevenaars</span>
+      <span>nickhoevenaars.nl</span>
+    </div>
+  </footer>
+
+</body>
+</html>
