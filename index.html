@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nick Hoevenaars</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="favicon-32.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@300;500&display=swap" rel="stylesheet">
 <style>
@@ -14,6 +17,9 @@ body::before{content:"";position:fixed;inset:-30%;z-index:0;pointer-events:none;
 background:radial-gradient(38% 45% at 22% 28%,rgba(29,78,216,.45),transparent 60%),radial-gradient(34% 42% at 80% 70%,rgba(109,40,217,.38),transparent 62%),radial-gradient(30% 38% at 60% 20%,rgba(59,130,246,.30),transparent 60%);
 filter:blur(40px);animation:drift 18s ease-in-out infinite alternate}
 @keyframes drift{from{transform:translate3d(-3%,-2%,0) scale(1)}to{transform:translate3d(4%,3%,0) scale(1.15)}}
+/* spotlight volgt de muis */
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(560px circle at var(--mx,50%) var(--my,40%),rgba(59,130,246,.16),transparent 70%);opacity:0;transition:opacity .6s}
+body.spot-on::after{opacity:1}
 .wrap{width:100%;max-width:880px;margin:0 auto;padding:0 1.5rem;position:relative;z-index:1}
 header{padding:1.6rem 0;border-bottom:1px solid rgba(255,255,255,.08)}
 .logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1rem}
@@ -42,5 +48,12 @@ footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem
 Bekijk mijn LinkedIn</a>
 </div></main>
 <footer><div class="wrap"><span>&copy; 2026 Nick Hoevenaars</span><span>nickhoevenaars.nl</span></div></footer>
+<script>
+if(matchMedia('(hover:hover)').matches&&!matchMedia('(prefers-reduced-motion:reduce)').matches){
+let tx=innerWidth/2,ty=innerHeight*.4,x=tx,y=ty;
+addEventListener('pointermove',e=>{tx=e.clientX;ty=e.clientY;document.body.classList.add('spot-on')},{passive:true});
+(function loop(){x+=(tx-x)*.08;y+=(ty-y)*.08;document.documentElement.style.setProperty('--mx',x+'px');document.documentElement.style.setProperty('--my',y+'px');requestAnimationFrame(loop)})();
+}
+</script>
 </body>
 </html>
