@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>404 · Nick Hoevenaars</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="favicon-32.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@300;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0A0A0C;color:#F5F4F0;font-family:'Inter',system-ui,sans-serif;font-weight:300;min-height:100vh;display:flex;flex-direction:column;position:relative;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:-30%;z-index:0;pointer-events:none;
+background:radial-gradient(38% 45% at 22% 28%,rgba(29,78,216,.45),transparent 60%),radial-gradient(34% 42% at 80% 70%,rgba(109,40,217,.38),transparent 62%),radial-gradient(30% 38% at 60% 20%,rgba(59,130,246,.30),transparent 60%);
+filter:blur(40px);animation:drift 18s ease-in-out infinite alternate}
+@keyframes drift{from{transform:translate3d(-3%,-2%,0) scale(1)}to{transform:translate3d(4%,3%,0) scale(1.15)}}
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(560px circle at var(--mx,50%) var(--my,40%),rgba(59,130,246,.16),transparent 70%);opacity:0;transition:opacity .6s}
+body.spot-on::after{opacity:1}
+.wrap{width:100%;max-width:880px;margin:0 auto;padding:0 1.5rem;position:relative;z-index:1}
+header{padding:1.6rem 0;border-bottom:1px solid rgba(255,255,255,.08)}
+.logo{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1rem;text-decoration:none;color:#F5F4F0;display:inline-block}
+.logo span{color:#3B82F6}
+main{flex:1;display:flex;align-items:center;padding:5rem 0}
+.code{font-family:'Space Grotesk',sans-serif;font-weight:500;font-size:.9rem;letter-spacing:.3em;color:#3B82F6;margin-bottom:1.2rem}
+h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:clamp(2.6rem,9vw,5.5rem);line-height:.98;letter-spacing:-.03em;margin-bottom:1.4rem}
+.lead{color:#9A9AA0;margin-bottom:2.8rem;max-width:38ch}
+.cta{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:.6rem;background:linear-gradient(135deg,#1D4ED8,#3B82F6);color:#fff;font-family:'Space Grotesk',sans-serif;font-weight:500;font-size:.95rem;text-decoration:none;padding:.9rem 1.5rem;border-radius:100px;box-shadow:0 4px 20px rgba(29,78,216,.35);transition:transform .25s,box-shadow .25s}
+.cta:hover{transform:translateY(-2px);box-shadow:0 10px 34px rgba(59,130,246,.6)}
+.cta::before{content:"";position:absolute;top:0;left:-130%;width:55%;height:100%;background:linear-gradient(120deg,transparent,rgba(255,255,255,.45),transparent);transform:skewX(-20deg);transition:left .6s ease}
+.cta:hover::before{left:140%}
+footer{border-top:1px solid rgba(255,255,255,.08);padding:1.6rem 0;font-size:.8rem;color:#9A9AA0}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
+@media(prefers-reduced-motion:reduce){body::before{animation:none}.cta{transition:none}}
+</style>
+</head>
+<body>
+<header><div class="wrap"><a class="logo" href="/">NH<span>.</span></a></div></header>
+<main><div class="wrap">
+<p class="code">404</p>
+<h1>Hier is<br>niks.</h1>
+<p class="lead">Deze pagina bestaat niet, of niet meer. Maar de weg terug is makkelijk gevonden.</p>
+<a class="cta" href="/">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+Terug naar home</a>
+</div></main>
+<footer><div class="wrap"><span>&copy; 2026 Nick Hoevenaars</span><span>nickhoevenaars.nl</span></div></footer>
+<script>
+if(matchMedia('(hover:hover)').matches&&!matchMedia('(prefers-reduced-motion:reduce)').matches){
+let tx=innerWidth/2,ty=innerHeight*.4,x=tx,y=ty;
+addEventListener('pointermove',e=>{tx=e.clientX;ty=e.clientY;document.body.classList.add('spot-on')},{passive:true});
+(function loop(){x+=(tx-x)*.08;y+=(ty-y)*.08;document.documentElement.style.setProperty('--mx',x+'px');document.documentElement.style.setProperty('--my',y+'px');requestAnimationFrame(loop)})();
+}
+</script>
+</body>
+</html>
