@@ -56,6 +56,15 @@ export const COST_CATEGORIES = [
   { id: 'overig', label: 'Overig' }
 ]
 
+export const COST_CADENCES = [
+  { id: 'eenmalig', label: 'Eenmalig' },
+  { id: 'maandelijks', label: 'Maandelijks' }
+]
+
+export function cadenceLabel(id) {
+  return COST_CADENCES.find((c) => c.id === id)?.label || 'Eenmalig'
+}
+
 export function phaseLabel(id) {
   if (id === 'onhold') return 'On hold'
   return PHASES.find((p) => p.id === id)?.label || id || '—'

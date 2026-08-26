@@ -1,6 +1,6 @@
 import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
-  QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES,
+  QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
   requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, replaceAllocations,
   upsert, remove, setPhase,
@@ -33,6 +33,22 @@ function fmtDateTime(v) {
 function money(v) {
   if (v == null || v === '') return '—'
   return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(Number(v))
+}
+function costCadence(c) {
+  return c?.cadence === 'maandelijks' ? 'maandelijks' : 'eenmalig'
+}
+function isMonthlyCost(c) {
+  return costCadence(c) === 'maandelijks'
+}
+function moneyWithCadence(amount, cadence) {
+  const label = money(amount)
+  return cadence === 'maandelijks' ? `${label} /mnd` : label
+}
+function moneyStack(oneOff, monthly) {
+  const lines = []
+  if (oneOff) lines.push(money(oneOff))
+  if (monthly) lines.push(money(monthly) + ' /mnd')
+  return lines.join('<br>') || money(0)
 }
 function hash() {
   const raw = (location.hash || '#/dashboard').replace(/^#/, '')
@@ -152,27 +168,29 @@ function contactPersonFields(c, selectedId) {
     <div class="field"><label>Rol</label><input name="contact_role" value="${esc(person?.role || '')}" placeholder="optioneel"></div>`
 }
 
-function customerCostShare(customerId) {
+function customerCostShare(customerId, cadence) {
   return costs.reduce((s, cost) => {
+    if (cadence && costCadence(cost) !== cadence) return s
     const a = (cost.allocations || []).find((x) => x.customer_id === customerId)
     return s + Number(a?.amount || 0)
   }, 0)
 }
 
 function customerMoneyBlock(c) {
-  const rev = Number(c.revenueTotal || 0)
-  const cost = customerCostShare(c.id)
+  const revOnce = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
+  const revMonth = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
+  const costOnce = customerCostShare(c.id, 'eenmalig')
+  const costMonth = customerCostShare(c.id, 'maandelijks')
   const linkedCosts = costs.filter((x) => (x.allocations || []).some((a) => a.customer_id === c.id))
   return `
     <div class="grid cards" style="margin-bottom:1rem">
-      <div class="card"><h3>Opbrengsten</h3><div class="metric good">${money(rev)}</div></div>
-      <div class="card"><h3>Kosten (aandeel)</h3><div class="metric bad">${money(cost)}</div></div>
-      <div class="card"><h3>Saldo</h3><div class="metric ${rev - cost >= 0 ? 'good' : 'bad'}">${money(rev - cost)}</div></div>
+      <div class="card"><h3>Eenmalig</h3><div class="metric ${revOnce - costOnce >= 0 ? 'good' : 'bad'}">${money(revOnce - costOnce)}</div><p class="tiny">${money(revOnce)} in · ${money(costOnce)} uit</p></div>
+      <div class="card"><h3>Per maand</h3><div class="metric ${revMonth - costMonth >= 0 ? 'good' : 'bad'}">${money(revMonth - costMonth)} /mnd</div><p class="tiny">${money(revMonth)} in · ${money(costMonth)} uit</p></div>
     </div>
     <div class="list">
-      ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${money(r.amount)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
+      ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${moneyWithCadence(r.amount, r.kind)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
     </div>
-    ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten meegerekend: ${linkedCosts.map((x) => esc(x.title)).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld aan deze klant.</p>'}`
+    ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten meegerekend: ${linkedCosts.map((x) => `${esc(x.title)} (${cadenceLabel(costCadence(x))})`).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld aan deze klant.</p>'}`
 }
 
 function shell(content, active) {
@@ -435,36 +453,46 @@ function settingsView() {
 }
 
 function moneyView() {
-  const totalCost = costs.reduce((s, c) => s + Number(c.amount || 0), 0)
-  const totalAlloc = costs.reduce((s, c) => s + Number(c.allocated || 0), 0)
-  const totalUnlinked = costs.reduce((s, c) => s + Number(c.unlinked || 0), 0)
+  const oneOffCosts = costs.filter((c) => !isMonthlyCost(c))
+  const monthlyCosts = costs.filter(isMonthlyCost)
+  const totalCostOnce = oneOffCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const totalCostMonth = monthlyCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const totalAllocOnce = oneOffCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
+  const totalAllocMonth = monthlyCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
+  const totalUnlinkedOnce = oneOffCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
+  const totalUnlinkedMonth = monthlyCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
   const allRevenues = [
     ...customers.flatMap((c) => (c.revenues || []).map((r) => ({ ...r, company: c.company_name, cid: c.id }))),
     ...looseRevenues.map((r) => ({ ...r, company: 'Niet gekoppeld', cid: null }))
   ].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''))
-  const totalRev = allRevenues.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const totalRevOnce = allRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
+  const totalRevMonth = allRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
   const pipeline = customers.flatMap((c) => c.openOpps).reduce((s, o) => s + Number(o.potential_value || 0), 0)
   const acceptedQuotes = customers.flatMap((c) => (c.quotes || []).filter((q) => q.status === 'geaccepteerd'))
     .reduce((s, q) => s + Number(q.amount || 0), 0)
   const perCustomer = customers.map((c) => {
-    const rev = Number(c.revenueTotal || 0)
-    const cost = customerCostShare(c.id)
-    return { ...c, rev, cost, result: rev - cost }
-  }).filter((c) => c.rev || c.cost).sort((a, b) => b.result - a.result)
+    const revOnce = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
+    const revMonth = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
+    const costOnce = customerCostShare(c.id, 'eenmalig')
+    const costMonth = customerCostShare(c.id, 'maandelijks')
+    return { ...c, revOnce, revMonth, costOnce, costMonth, resultOnce: revOnce - costOnce, resultMonth: revMonth - costMonth }
+  }).filter((c) => c.revOnce || c.revMonth || c.costOnce || c.costMonth)
+    .sort((a, b) => (b.resultOnce - a.resultOnce) || (b.resultMonth - a.resultMonth))
 
   return shell(`
     <div class="page-head">
       <div>
         <h1>Geld</h1>
-        <p class="lead">Kosten smeren over klanten of los laten. Opbrengsten per klant of zonder koppeling.</p>
+        <p class="lead">Kosten eenmalig of maandelijks. Smeren over klanten of los laten.</p>
       </div>
       ${plusBar()}
     </div>
     <div class="grid cards">
-      <div class="card"><h3>Opbrengsten</h3><div class="metric good">${money(totalRev)}</div></div>
-      <div class="card"><h3>Kosten</h3><div class="metric bad">${money(totalCost)}</div></div>
-      <div class="card"><h3>Resultaat</h3><div class="metric ${totalRev - totalCost >= 0 ? 'good' : 'bad'}">${money(totalRev - totalCost)}</div></div>
-      <div class="card"><h3>Niet gekoppelde kosten</h3><div class="metric">${money(totalUnlinked)}</div><p class="tiny">${money(totalAlloc)} is verdeeld over klanten</p></div>
+      <div class="card"><h3>Kosten eenmalig</h3><div class="metric bad">${money(totalCostOnce)}</div></div>
+      <div class="card"><h3>Kosten maandelijks</h3><div class="metric bad">${money(totalCostMonth)} /mnd</div></div>
+      <div class="card"><h3>Resultaat eenmalig</h3><div class="metric ${totalRevOnce - totalCostOnce >= 0 ? 'good' : 'bad'}">${money(totalRevOnce - totalCostOnce)}</div><p class="tiny">${money(totalRevOnce)} in</p></div>
+      <div class="card"><h3>Resultaat per maand</h3><div class="metric ${totalRevMonth - totalCostMonth >= 0 ? 'good' : 'bad'}">${money(totalRevMonth - totalCostMonth)} /mnd</div><p class="tiny">${money(totalRevMonth)} in</p></div>
+      <div class="card"><h3>Niet gekoppelde kosten</h3><div class="metric">${moneyStack(totalUnlinkedOnce, totalUnlinkedMonth)}</div><p class="tiny">${moneyStack(totalAllocOnce, totalAllocMonth)} verdeeld over klanten</p></div>
       <div class="card"><h3>Openstaande pipeline</h3><div class="metric">${money(pipeline)}</div><p class="tiny">waarde lopende kansen</p></div>
       <div class="card"><h3>Geaccepteerde offertes</h3><div class="metric">${money(acceptedQuotes)}</div></div>
     </div>
@@ -477,9 +505,9 @@ function moneyView() {
           ${perCustomer.map((c) => `
             <tr data-go="#/klanten/${c.id}">
               <td><b>${esc(c.company_name)}</b></td>
-              <td>${money(c.rev)}</td>
-              <td>${money(c.cost)}</td>
-              <td>${money(c.result)}</td>
+              <td>${moneyStack(c.revOnce, c.revMonth)}</td>
+              <td>${moneyStack(c.costOnce, c.costMonth)}</td>
+              <td>${moneyStack(c.resultOnce, c.resultMonth)}</td>
             </tr>`).join('') || `<tr><td colspan="4" class="muted">Nog geen geldstromen per klant.</td></tr>`}
         </tbody>
       </table>
@@ -491,25 +519,26 @@ function moneyView() {
     </div>
     <div class="table-wrap static">
       <table>
-        <thead><tr><th>Omschrijving</th><th>Bedrag</th><th>Datum</th><th>Verdeling</th><th></th></tr></thead>
+        <thead><tr><th>Omschrijving</th><th>Soort</th><th>Bedrag</th><th>Datum</th><th>Verdeling</th><th></th></tr></thead>
         <tbody>
           ${costs.map((cost) => `
             <tr>
               <td><b>${esc(cost.title)}</b><div class="tiny">${esc(cost.category || '')}</div></td>
-              <td>${money(cost.amount)}</td>
-              <td>${fmtDate(cost.incurred_at)}</td>
+              <td><span class="chip">${esc(cadenceLabel(costCadence(cost)))}</span></td>
+              <td>${moneyWithCadence(cost.amount, costCadence(cost))}</td>
+              <td>${isMonthlyCost(cost) ? `<span class="tiny">vanaf</span> ${fmtDate(cost.incurred_at)}` : fmtDate(cost.incurred_at)}</td>
               <td>${cost.allocations.length
                 ? cost.allocations.map((a) => {
                     const cust = customers.find((x) => x.id === a.customer_id)
-                    return `${esc(cust?.company_name || '?')} ${money(a.amount)}`
-                  }).join('<br>') + (cost.unlinked > 0.009 ? `<div class="tiny">Los: ${money(cost.unlinked)}</div>` : '')
+                    return `${esc(cust?.company_name || '?')} ${moneyWithCadence(a.amount, costCadence(cost))}`
+                  }).join('<br>') + (cost.unlinked > 0.009 ? `<div class="tiny">Los: ${moneyWithCadence(cost.unlinked, costCadence(cost))}</div>` : '')
                 : '<span class="chip">niet gekoppeld</span>'}</td>
               <td class="row-actions" data-stop="1">
                 <button type="button" class="btn ghost small" data-open="cost" data-record="${cost.id}">Verdelen</button>
                 <button type="button" class="btn ghost small" data-unlink="${cost.id}">Alles los</button>
                 <button type="button" class="btn danger small" data-delete="nh_costs" data-id="${cost.id}">Verwijder</button>
               </td>
-            </tr>`).join('') || `<tr><td colspan="5" class="muted">Nog geen kosten.</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="6" class="muted">Nog geen kosten.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -911,8 +940,9 @@ function showModal(kind, payload = {}) {
     wrap.innerHTML = modalHtml(existing ? 'Kosten verdelen' : 'Kosten', `
       <input type="hidden" name="id" value="${esc(existing?.id || '')}">
       <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existing?.title || '')}" placeholder="Hosting, tools, inkoop…"></div>
-      <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" min="0" required value="${esc(existing?.amount ?? '')}"></div>
-      <div class="field"><label>Datum</label><input type="date" name="incurred_at" value="${esc(existing?.incurred_at || isoDate())}"></div>
+      <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" min="0" required value="${esc(existing?.amount ?? '')}"><p class="tiny">Bij maandelijks: bedrag per maand</p></div>
+      <div class="field"><label>Soort</label><select name="cadence">${options(COST_CADENCES, existing?.cadence || 'eenmalig')}</select></div>
+      <div class="field"><label>Datum</label><input type="date" name="incurred_at" value="${esc(existing?.incurred_at || isoDate())}"><p class="tiny">Bij maandelijks: startdatum</p></div>
       <div class="field"><label>Categorie</label>
         <input name="category" list="cost-cats" value="${esc(existing?.category || '')}">
         <datalist id="cost-cats">${COST_CATEGORIES.map((x) => `<option value="${esc(x.label)}">`).join('')}</datalist>
@@ -1075,6 +1105,7 @@ async function onSubmit(e, modal) {
       delete v.id
       const row = await upsert('nh_costs', {
         title: v.title, amount: Number(v.amount), incurred_at: v.incurred_at || isoDate(),
+        cadence: v.cadence === 'maandelijks' ? 'maandelijks' : 'eenmalig',
         category: v.category, notes: v.notes
       }, id)
       await replaceAllocations(row.id, readAllocations(form))
