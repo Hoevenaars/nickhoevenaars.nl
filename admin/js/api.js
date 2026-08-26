@@ -33,6 +33,29 @@ export const CUSTOMER_STATUSES = [
   { id: 'verloren', label: 'Verloren' }
 ]
 
+export const QUOTE_STATUSES = [
+  { id: 'concept', label: 'Concept' },
+  { id: 'verstuurd', label: 'Verstuurd' },
+  { id: 'geaccepteerd', label: 'Geaccepteerd' },
+  { id: 'afgewezen', label: 'Afgewezen' }
+]
+
+export const REVENUE_KINDS = [
+  { id: 'eenmalig', label: 'Eenmalig' },
+  { id: 'maandelijks', label: 'Maandelijks' },
+  { id: 'offerte', label: 'Uit offerte' },
+  { id: 'overig', label: 'Overig' }
+]
+
+export const COST_CATEGORIES = [
+  { id: 'software', label: 'Software' },
+  { id: 'hosting', label: 'Hosting' },
+  { id: 'marketing', label: 'Marketing' },
+  { id: 'inkoop', label: 'Inkoop' },
+  { id: 'reis', label: 'Reis / onkosten' },
+  { id: 'overig', label: 'Overig' }
+]
+
 export function phaseLabel(id) {
   if (id === 'onhold') return 'On hold'
   return PHASES.find((p) => p.id === id)?.label || id || '—'
@@ -60,7 +83,9 @@ const CUSTOMER_EMBED = `
   nh_opportunities (*),
   nh_ideas (*),
   nh_notes (*),
-  nh_reminders (*)
+  nh_reminders (*),
+  nh_quotes (*),
+  nh_revenues (*)
 `
 
 export async function requireAdmin() {
@@ -98,6 +123,8 @@ function normalizeCustomer(c) {
   const ideas = (c.nh_ideas || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   const notes = (c.nh_notes || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   const reminders = (c.nh_reminders || []).sort((a, b) => a.remind_at.localeCompare(b.remind_at))
+  const quotes = (c.nh_quotes || []).sort((a, b) => (b.issued_at || '').localeCompare(a.issued_at || ''))
+  const revenues = (c.nh_revenues || []).sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''))
   const lastLog = logs[0] || null
   const openTodos = todos.filter((t) => t.status === 'open')
   const openOpps = opps.filter((o) => o.phase !== 'akkoord' && o.phase !== 'verloren' && o.phase !== 'onhold')
@@ -111,12 +138,55 @@ function normalizeCustomer(c) {
     ideas,
     notes,
     reminders,
+    quotes,
+    revenues,
     lastLog,
     lastContactAt: lastLog?.occurred_at || null,
     openTodos,
     openOpps,
-    nextAction
+    nextAction,
+    revenueTotal: revenues.reduce((s, r) => s + Number(r.amount || 0), 0)
   }
+}
+
+export async function loadCosts() {
+  const { data, error } = await sb
+    .from('nh_costs')
+    .select('*, nh_cost_allocations (*)')
+    .order('incurred_at', { ascending: false })
+  if (error) throw error
+  return (data || []).map((cost) => {
+    const allocations = cost.nh_cost_allocations || []
+    const allocated = allocations.reduce((s, a) => s + Number(a.amount || 0), 0)
+    const total = Number(cost.amount || 0)
+    return {
+      ...cost,
+      allocations,
+      allocated,
+      unlinked: Math.max(0, total - allocated)
+    }
+  })
+}
+
+export async function loadLooseRevenues() {
+  const { data, error } = await sb
+    .from('nh_revenues')
+    .select('*')
+    .is('customer_id', null)
+    .order('received_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function replaceAllocations(costId, rows) {
+  const { error: delErr } = await sb.from('nh_cost_allocations').delete().eq('cost_id', costId)
+  if (delErr) throw delErr
+  const clean = rows.filter((r) => r.customer_id && Number(r.amount) > 0)
+    .map((r) => ({ cost_id: costId, customer_id: r.customer_id, amount: Number(r.amount) }))
+  if (!clean.length) return []
+  const { data, error } = await sb.from('nh_cost_allocations').insert(clean).select()
+  if (error) throw error
+  return data
 }
 
 function nextActionFor(c, { logs, openTodos, openOpps, reminders }) {

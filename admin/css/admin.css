@@ -201,7 +201,34 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   background: #141418; border: 1px solid var(--line-strong); border-radius: 18px; padding: 1.1rem 1.15rem 1.2rem
 }
 .modal h2 { margin-bottom: .8rem; font-size: 1.15rem }
-.actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .4rem }
+.actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .4rem; flex-wrap: wrap }
+.plus { position: relative }
+.plus-btn {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #fff; border: 0; font-size: 1.5rem; line-height: 1; cursor: pointer;
+  font-family: 'Space Grotesk', sans-serif;
+}
+.plus-menu {
+  display: none; position: absolute; right: 0; top: calc(100% + .4rem);
+  min-width: 220px; background: #16161b; border: 1px solid var(--line-strong);
+  border-radius: 14px; padding: .4rem; z-index: 8;
+  box-shadow: 0 12px 40px rgba(0,0,0,.4)
+}
+.plus.open .plus-menu { display: grid }
+.plus-menu button {
+  background: transparent; border: 0; color: var(--ink); text-align: left;
+  padding: .55rem .7rem; border-radius: 10px; cursor: pointer
+}
+.plus-menu button:hover { background: rgba(59,130,246,.12) }
+.plus-menu small { display: block; color: var(--muted); font-size: .72rem }
+.person-form { border: 1px solid var(--line); border-radius: 12px; padding: .8rem }
+.alloc-row { display: grid; grid-template-columns: 1fr 120px 36px; gap: .45rem; align-items: end }
+.metric.good { color: var(--good) }
+.metric.bad { color: var(--bad) }
+.table-wrap.static tbody tr { cursor: default }
+.table-wrap.static tbody tr:hover { background: transparent }
+.modal.wide { width: min(720px, 100%) }
 
 @media (max-width: 860px) {
   .shell { flex-direction: column }
