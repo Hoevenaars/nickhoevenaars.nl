@@ -187,6 +187,16 @@ export async function loadLooseRevenues() {
   return data || []
 }
 
+export async function loadLooseTodos() {
+  const { data, error } = await sb
+    .from('nh_todos')
+    .select('*')
+    .is('customer_id', null)
+    .order('due_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
 export async function replaceAllocations(costId, rows) {
   const { error: delErr } = await sb.from('nh_cost_allocations').delete().eq('cost_id', costId)
   if (delErr) throw delErr
