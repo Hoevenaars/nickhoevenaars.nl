@@ -197,12 +197,6 @@ function matchesQuery(c, q) {
   return blob.includes(q)
 }
 
-function weekRange() {
-  const start = isoDate()
-  const end = addDays(7)
-  return { start, end }
-}
-
 async function refresh() {
   ;[customers, costs, looseRevenues, looseTodos] = await Promise.all([
     loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos()
@@ -216,18 +210,28 @@ function currentCustomerId() {
 
 function plusBar() {
   const cid = currentCustomerId()
+  const items = cid ? [
+    ['todo', 'Taak', cid],
+    ['opp', 'Kans', cid],
+    ['quote', 'Offerte', cid],
+    ['revenue', 'Opbrengst', cid],
+    ['contact', 'Contactpersoon', cid],
+    ['cost', 'Kosten', cid]
+  ] : [
+    ['customer', 'Klant', ''],
+    ['todo', 'Taak', ''],
+    ['activity', 'Contact', ''],
+    ['quote', 'Offerte', ''],
+    ['cost', 'Kosten', ''],
+    ['revenue', 'Opbrengst', '']
+  ]
   return `
     <div class="plus" data-plus>
       <button type="button" class="plus-btn" title="Toevoegen" aria-label="Toevoegen">+</button>
       <div class="plus-menu">
-        <button type="button" data-open="customer">Nieuwe klant<small>Bedrijf of prospect</small></button>
-        <button type="button" data-open="quote" data-customer="${esc(cid)}">Offerte</button>
-        <button type="button" data-open="activity" data-customer="${esc(cid)}">Activiteit<small>Contactmoment</small></button>
-        <button type="button" data-open="todo" data-customer="${esc(cid)}">Taak</button>
-        <button type="button" data-open="opp" data-customer="${esc(cid)}">Kans / upsell</button>
-        <button type="button" data-open="contact" data-customer="${esc(cid)}">Contactpersoon</button>
-        <button type="button" data-open="cost">Kosten<small>Smeren of los</small></button>
-        <button type="button" data-open="revenue" data-customer="${esc(cid)}">Opbrengst</button>
+        ${items.map(([open, label, customer]) =>
+          `<button type="button" data-open="${open}"${customer ? ` data-customer="${esc(customer)}"` : ''}>${label}</button>`
+        ).join('')}
       </div>
     </div>`
 }
@@ -269,14 +273,14 @@ function customerMoneyBlock(c) {
   const costMonth = customerCostShare(c.id, 'maandelijks')
   const linkedCosts = costs.filter((x) => (x.allocations || []).some((a) => a.customer_id === c.id))
   return `
-    <div class="grid cards" style="margin-bottom:1rem">
-      <div class="card"><h3>Eenmalig</h3><div class="metric ${revOnce - costOnce >= 0 ? 'good' : 'bad'}">${money(revOnce - costOnce)}</div><p class="tiny">${money(revOnce)} in · ${money(costOnce)} uit</p></div>
-      <div class="card"><h3>Per maand</h3><div class="metric ${revMonth - costMonth >= 0 ? 'good' : 'bad'}">${money(revMonth - costMonth)} /mnd</div><p class="tiny">${money(revMonth)} in · ${money(costMonth)} uit</p></div>
+    <div class="strip">
+      <span>Eenmalig <b class="${revOnce - costOnce >= 0 ? 'good' : 'bad'}">${money(revOnce - costOnce)}</b></span>
+      <span class="muted">/mnd <b class="${revMonth - costMonth >= 0 ? 'good' : 'bad'}">${money(revMonth - costMonth)}</b></span>
     </div>
     <div class="list">
       ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${moneyWithCadence(r.amount, r.kind)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small><div class="actions"><button class="btn ghost small" data-open="revenue" data-record="${r.id}" data-customer="${c.id}">Bewerken</button></div></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
     </div>
-    ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten meegerekend: ${linkedCosts.map((x) => `${esc(x.title)} (${cadenceLabel(costCadence(x))})`).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld aan deze klant.</p>'}`
+    ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten: ${linkedCosts.map((x) => `${esc(x.title)} (${cadenceLabel(costCadence(x))})`).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld.</p>'}`
 }
 
 function shell(content, active) {
@@ -284,14 +288,15 @@ function shell(content, active) {
   return `
     <aside class="sidebar">
       <div class="brand">NH<span>.</span><small>Admin</small></div>
-      <button class="nav-btn ${active === 'dashboard' ? 'active' : ''}" data-go="#/dashboard">Dashboard</button>
+      <button class="nav-btn ${active === 'dashboard' ? 'active' : ''}" data-go="#/dashboard">Nu</button>
       <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Klanten</button>
       <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Sales</button>
-      <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">To-do’s</button>
+      <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">Taken</button>
       <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Geld</button>
-      <button class="nav-btn ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
+      <button class="nav-btn nav-settings ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
       <div class="spacer"></div>
-      <div class="userbox">Ingelogd als<b>${esc(email)}</b>
+      <div class="userbox">
+        <button type="button" class="who" data-go="#/instellingen">Ingelogd als<b>${esc(email)}</b></button>
         <button class="btn ghost small" data-action="logout">Uitloggen</button>
       </div>
     </aside>
@@ -318,99 +323,118 @@ function loginView(err = '') {
     </div>`
 }
 
-function dashboardView() {
+function dateBucket(dateStr) {
+  if (!dateStr) return null
+  const d = String(dateStr).slice(0, 10)
+  const today = isoDate()
+  if (d < today) return 'overdue'
+  if (d === today) return 'today'
+  if (d <= addDays(7)) return 'week'
+  return null
+}
+
+function workItems() {
+  const today = isoDate()
+  const items = []
+  const push = (kind, title, sub, href, at, meta) => {
+    items.push({ kind, title, sub, href, at: at || '9999', meta })
+  }
+  const hrefFor = (cid) => cid ? `#/klanten/${cid}` : '#/todos'
+
   const openTodos = [
     ...customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
     ...looseTodos.filter((t) => t.status === 'open').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
-  ].sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999'))
-  const recent = customers.flatMap((c) => c.logs.map((l) => ({ ...l, company: c.company_name, cid: c.id })))
-    .sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at)).slice(0, 8)
-  const staleList = customers.filter(stale).sort((a, b) => daysSince(b.lastContactAt) - daysSince(a.lastContactAt))
-  const sales = customers.flatMap((c) => c.openOpps.map((o) => ({ ...o, company: c.company_name, cid: c.id })))
-  const upsell = customers.flatMap((c) => c.opps.filter((o) => o.is_upsell && o.phase !== 'verloren' && o.phase !== 'akkoord')
-    .map((o) => ({ ...o, company: c.company_name, cid: c.id })))
-  const { start, end } = weekRange()
-  const reminders = customers.flatMap((c) => c.reminders.filter((r) => !r.done && r.remind_at >= start && r.remind_at <= end)
-    .map((r) => ({ ...r, company: c.company_name, cid: c.id })))
-    .sort((a, b) => a.remind_at.localeCompare(b.remind_at))
+  ]
+  for (const t of openTodos) {
+    const kind = dateBucket(t.due_at) || (t.priority === 'hoog' && !t.due_at ? 'today' : null)
+    if (!kind) continue
+    push(kind, t.title, `Taak · ${t.company}`, hrefFor(t.cid), t.due_at, t.due_at ? (String(t.due_at).slice(0, 10) === today ? 'vandaag' : fmtDate(t.due_at)) : 'geen datum')
+  }
+  for (const c of customers) {
+    for (const r of c.reminders.filter((x) => !x.done)) {
+      const kind = dateBucket(r.remind_at)
+      if (!kind) continue
+      push(kind, r.title, `Herinnering · ${c.company_name}`, `#/klanten/${c.id}`, r.remind_at, String(r.remind_at).slice(0, 10) === today ? 'vandaag' : fmtDate(r.remind_at))
+    }
+    for (const o of c.openOpps) {
+      const kind = dateBucket(o.next_action_at)
+      if (!kind) continue
+      push(kind, o.title, `Sales · ${c.company_name}`, `#/klanten/${c.id}?tab=werk`, o.next_action_at, o.next_action || fmtDate(o.next_action_at))
+    }
+    if (c.status === 'inactief' || c.status === 'verloren') continue
+    if (!c.lastContactAt) {
+      push('overdue', c.company_name, 'Nog geen contact', `#/klanten/${c.id}`, '0000', '—')
+    } else if (stale(c)) {
+      push('week', c.company_name, `Stil · ${daysSince(c.lastContactAt)} dagen`, `#/klanten/${c.id}`, c.lastContactAt, daysSince(c.lastContactAt) + ' d')
+    }
+  }
+
+  const order = { overdue: 0, today: 1, week: 2 }
+  items.sort((a, b) => (order[a.kind] - order[b.kind]) || a.at.localeCompare(b.at) || a.title.localeCompare(b.title, 'nl'))
+  return items.slice(0, 24)
+}
+
+function queueHtml(items) {
+  if (!items.length) return '<p class="muted">Niets openstaand. Lekker.</p>'
+  return [['overdue', 'Te laat'], ['today', 'Vandaag'], ['week', 'Deze week / stil']].map(([kind, label]) => {
+    const rows = items.filter((i) => i.kind === kind)
+    if (!rows.length) return ''
+    return `<div class="queue ${kind === 'overdue' ? 'overdue' : ''}">
+      <h3>${label}</h3>
+      ${rows.map((r) => `
+        <div class="queue-row">
+          <button type="button" class="queue-main" data-go="${esc(r.href)}">
+            <b>${esc(r.title)}</b>
+            <small>${esc(r.sub)}</small>
+          </button>
+          <span class="tiny">${esc(r.meta)}</span>
+        </div>`).join('')}
+    </div>`
+  }).join('')
+}
+
+function dashboardView() {
   const today = isoDate()
   const monthRevOnce = allRevenuesList().reduce((s, r) => s + (r.kind === 'maandelijks' || !inPeriod(r.received_at, 'maand') ? 0 : Number(r.amount || 0)), 0)
   const monthCostOnce = costs.reduce((s, c) => s + (isMonthlyCost(c) || !inPeriod(c.incurred_at, 'maand') ? 0 : Number(c.amount || 0)), 0)
   const monthRevRecurring = allRevenuesList().reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
   const monthCostRecurring = costs.reduce((s, c) => s + (isMonthlyActive(c, today) ? Number(c.amount || 0) : 0), 0)
+  const resultOnce = monthRevOnce - monthCostOnce
+  const resultMonth = monthRevRecurring - monthCostRecurring
 
   return shell(`
     <div class="page-head">
       <div>
-        <h1>Dashboard</h1>
-        <p class="lead">Wat aandacht nodig heeft.</p>
+        <h1>Nu doen</h1>
+        <p class="lead">Eén lijst. Wat te laat is, wat vandaag moet, wat deze week stilstaat.</p>
       </div>
       ${plusBar()}
     </div>
-    <div class="grid cards">
-      <div class="card"><h3>Open to-do’s</h3><div class="metric">${openTodos.length}</div></div>
-      <div class="card"><h3>Lopende sales</h3><div class="metric">${sales.length}</div></div>
-      <div class="card"><h3>Geen recent contact</h3><div class="metric">${staleList.length}<span>≥ 30 dagen</span></div></div>
-      <div class="card"><h3>Reminders deze week</h3><div class="metric">${reminders.length}</div></div>
-      <div class="card"><h3>Deze maand eenmalig</h3><div class="metric ${monthRevOnce - monthCostOnce >= 0 ? 'good' : 'bad'}">${money(monthRevOnce - monthCostOnce)}</div><p class="tiny">${money(monthRevOnce)} in · ${money(monthCostOnce)} uit</p></div>
-      <div class="card"><h3>Vaste last /mnd</h3><div class="metric ${monthRevRecurring - monthCostRecurring >= 0 ? 'good' : 'bad'}">${money(monthRevRecurring - monthCostRecurring)} /mnd</div><p class="tiny">${money(monthRevRecurring)} in · ${money(monthCostRecurring)} uit</p></div>
-    </div>
-    <div class="grid cards" style="margin-top:1rem">
-      <section class="card">
-        <h3>Openstaande to-do’s</h3>
-        ${listBlock(openTodos.slice(0, 8), (t) => itemLink(t.cid, t.title, `${t.company} · ${t.due_at ? 'voor ' + fmtDate(t.due_at) : 'geen deadline'} · ${t.priority}`))}
-      </section>
-      <section class="card">
-        <h3>Recente contactmomenten</h3>
-        ${listBlock(recent, (l) => itemLink(l.cid, `${l.company} · ${typeLabel(l.type)}`, `${fmtDateTime(l.occurred_at)} — ${l.summary}`))}
-      </section>
-      <section class="card">
-        <h3>Lang geen contact</h3>
-        ${listBlock(staleList.slice(0, 8), (c) => itemLink(c.id, c.company_name, c.lastContactAt ? `${daysSince(c.lastContactAt)} dagen geleden` : 'Nog nooit contact'))}
-      </section>
-      <section class="card">
-        <h3>Lopende saleskansen</h3>
-        ${listBlock(sales.slice(0, 8), (o) => itemLink(o.cid, `${o.company} · ${o.title}`, `${phaseLabel(o.phase)}${o.next_action ? ' · ' + o.next_action : ''}`))}
-      </section>
-      <section class="card">
-        <h3>Upsell</h3>
-        ${listBlock(upsell.slice(0, 8), (o) => itemLink(o.cid, `${o.company} · ${o.title}`, `${money(o.potential_value)}${o.value_period ? ' ' + o.value_period : ''} · ${phaseLabel(o.phase)}`))}
-      </section>
-      <section class="card">
-        <h3>Reminders vandaag / deze week</h3>
-        ${listBlock(reminders, (r) => itemLink(r.cid, r.title, `${r.company} · ${r.remind_at === today ? 'vandaag' : fmtDate(r.remind_at)}`))}
-      </section>
-    </div>
+    ${queueHtml(workItems())}
+    <button type="button" class="strip" data-go="#/geld">
+      <span>Deze maand <b class="${resultOnce >= 0 ? 'good' : 'bad'}">${money(resultOnce)}</b></span>
+      <span class="muted">Vaste last ${money(resultMonth)} /mnd · Geld →</span>
+    </button>
   `, 'dashboard')
 }
 
 function itemLink(cid, title, sub) {
-  const href = cid ? `#/klanten/${cid}` : '#/todos'
+  const href = cid ? `#/klanten/${cid}?tab=werk` : '#/todos'
   return `<button class="item" data-go="${href}"><b>${esc(title)}</b><small>${esc(sub)}</small></button>`
 }
-function listBlock(arr, fn) {
-  if (!arr.length) return `<p class="empty">Niets open.</p>`
-  return `<div class="list">${arr.map(fn).join('')}</div>`
-}
-
 function customersView(params) {
   const q = (params.q || '').trim().toLowerCase()
   const f = params.f || 'alle'
   let rows = customers.filter((c) => matchesQuery(c, q))
-  const { start, end } = weekRange()
   if (f === 'taken') rows = rows.filter((c) => c.openTodos.length)
   if (f === 'stil') rows = rows.filter(stale)
   if (f === 'sales') rows = rows.filter((c) => c.openOpps.length)
-  if (f === 'upsell') rows = rows.filter((c) => c.opps.some((o) => o.is_upsell && o.phase !== 'verloren'))
-  if (f === 'reminders') rows = rows.filter((c) => c.reminders.some((r) => !r.done && r.remind_at >= start && r.remind_at <= end))
 
   const filters = [
     ['alle', 'Alle'],
-    ['taken', 'Openstaande taken'],
-    ['stil', 'Geen recent contact'],
-    ['sales', 'Openstaande sales'],
-    ['upsell', 'Upsell'],
-    ['reminders', 'Reminders deze week']
+    ['taken', 'Taken'],
+    ['stil', 'Stil'],
+    ['sales', 'Sales']
   ]
 
   return shell(`
@@ -422,7 +446,7 @@ function customersView(params) {
       ${plusBar()}
     </div>
     <div class="topbar">
-      <input class="search" data-search="klanten" value="${esc(params.q || '')}" placeholder="Zoek klant, contactpersoon, notitie, contactmoment of to-do">
+      <input class="search" data-search="klanten" value="${esc(params.q || '')}" placeholder="Zoek klant of contact">
     </div>
     <div class="filters">
       ${filters.map(([id, label]) => `<button class="filter ${f === id ? 'active' : ''}" data-go="#/klanten?f=${id}${q ? '&q=' + encodeURIComponent(params.q) : ''}">${label}</button>`).join('')}
@@ -430,20 +454,16 @@ function customersView(params) {
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Klant</th><th>Contactpersonen</th><th>Status</th><th>Laatste contact</th>
-          <th>Volgende actie</th><th>To-do’s</th><th>Sales</th>
+          <th>Klant</th><th>Status</th><th>Laatst</th><th>Volgende</th>
         </tr></thead>
         <tbody>
           ${rows.map((c) => `
             <tr data-go="#/klanten/${c.id}">
-              <td><b>${esc(c.company_name)}</b><div class="tiny">${esc((c.notes[0]?.body || c.extra_notes || '').slice(0, 80))}</div></td>
-              <td>${c.contacts.length ? c.contacts.map((p) => esc(p.name)).join(', ') : '<span class="muted">—</span>'}</td>
+              <td><b>${esc(c.company_name)}</b>${c.openTodos.length || c.openOpps.length ? `<div class="tiny">${c.openTodos.length ? c.openTodos.length + ' taak' : ''}${c.openTodos.length && c.openOpps.length ? ' · ' : ''}${c.openOpps.length ? c.openOpps.length + ' kans' : ''}</div>` : ''}</td>
               <td><span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span></td>
-              <td>${c.lastContactAt ? `${fmtDate(c.lastContactAt)}<div class="tiny">${esc(c.lastLog?.summary || '')}</div>` : '<span class="muted">Nog geen</span>'}</td>
+              <td>${c.lastContactAt ? `${fmtDate(c.lastContactAt)}${stale(c) ? '<div class="tiny">stil</div>' : ''}` : '<span class="muted">Nog geen</span>'}</td>
               <td>${c.nextAction ? `${esc(c.nextAction.label)}${c.nextAction.at ? `<div class="tiny">${fmtDate(c.nextAction.at)}</div>` : ''}` : '—'}</td>
-              <td>${c.openTodos.length}</td>
-              <td>${c.openOpps.length}</td>
-            </tr>`).join('') || `<tr><td colspan="7" class="muted">Nog geen klanten.</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="4" class="muted">Nog geen klanten.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -451,33 +471,29 @@ function customersView(params) {
 }
 
 function salesView() {
-  const rows = customers.flatMap((c) => c.opps.map((o) => {
-    const person = c.contacts.find((p) => p.id === o.contact_id) || primaryContact(c)
-    return { ...o, company: c.company_name, cid: c.id, person, lastContactAt: c.lastContactAt }
-  })).sort((a, b) => PHASE_VALUES.indexOf(a.phase === 'onhold' ? 'verloren' : a.phase) - PHASE_VALUES.indexOf(b.phase === 'onhold' ? 'verloren' : b.phase))
+  const rows = customers.flatMap((c) => c.opps.map((o) => ({ ...o, company: c.company_name, cid: c.id })))
+    .sort((a, b) => PHASE_VALUES.indexOf(a.phase === 'onhold' ? 'verloren' : a.phase) - PHASE_VALUES.indexOf(b.phase === 'onhold' ? 'verloren' : b.phase))
 
   return shell(`
     <div class="page-head">
       <div>
         <h1>Sales</h1>
-        <p class="lead">Eenvoudige lijst, snel een fase opschuiven.</p>
+        <p class="lead">Fase opschuiven. De rest staat bij de klant.</p>
       </div>
       ${plusBar()}
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Klant</th><th>Contactpersoon</th><th>Fase</th><th>Laatste contact</th>
-          <th>Volgende actie</th><th>Datum</th><th></th>
+          <th>Klant</th><th>Fase</th><th>Volgende</th><th>Datum</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.map((o) => {
             const i = PHASE_VALUES.indexOf(o.phase === 'onhold' ? 'verloren' : o.phase)
             return `
-            <tr data-go="#/klanten/${o.cid}">
+            <tr data-go="#/klanten/${o.cid}?tab=werk">
               <td><b>${esc(o.company)}</b><div class="tiny">${esc(o.title)}</div></td>
-              <td>${esc(o.person?.name || '—')}</td>
               <td><span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span></td>
-              <td>${fmtDate(o.lastContactAt)}</td>
               <td>${esc(o.next_action || '—')}</td>
               <td>${fmtDate(o.next_action_at)}</td>
               <td class="row-actions" data-stop="1">
@@ -486,7 +502,7 @@ function salesView() {
                 <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''} title="Volgende fase">→</button>
               </td>
             </tr>`
-          }).join('') || `<tr><td colspan="7" class="muted">Nog geen kansen. Voeg ze toe in een klantprofiel.</td></tr>`}
+          }).join('') || `<tr><td colspan="5" class="muted">Nog geen kansen.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -501,21 +517,22 @@ function todosView() {
   const done = [
     ...customers.flatMap((c) => c.todos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
     ...looseTodos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
-  ].sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at)).slice(0, 12)
+  ].sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at)).slice(0, 8)
 
   return shell(`
     <div class="page-head">
       <div>
-        <h1>To-do’s</h1>
-        <p class="lead">${open.length} openstaand. Taken mogen zonder klant.</p>
+        <h1>Taken</h1>
+        <p class="lead">${open.length} open. Mag ook zonder klant.</p>
       </div>
       ${plusBar()}
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>To-do</th><th>Klant</th><th>Deadline</th><th>Prioriteit</th><th></th></tr></thead>
+        <thead><tr><th>Taak</th><th>Klant</th><th>Deadline</th><th>Prio</th><th></th></tr></thead>
         <tbody>
           ${open.map((t) => `
-            <tr ${t.cid ? `data-go="#/klanten/${t.cid}"` : ''}>
+            <tr ${t.cid ? `data-go="#/klanten/${t.cid}?tab=werk"` : ''}>
               <td><b>${esc(t.title)}</b>${t.note ? `<div class="tiny">${esc(t.note)}</div>` : ''}</td>
               <td>${esc(t.company)}</td>
               <td>${fmtDate(t.due_at)}</td>
@@ -524,12 +541,12 @@ function todosView() {
                 <button class="btn ghost small" data-open="todo" data-record="${t.id}" ${t.cid ? `data-customer="${t.cid}"` : ''}>Bewerken</button>
                 <button class="btn ghost small" data-done="${t.id}">Afronden</button>
               </td>
-            </tr>`).join('') || `<tr><td colspan="5" class="muted">Geen open to-do’s.</td></tr>`}
+            </tr>`).join('') || `<tr><td colspan="5" class="muted">Geen open taken.</td></tr>`}
         </tbody>
       </table>
     </div>
-    <h3 style="margin:1.4rem 0 .6rem">Recent afgerond</h3>
-    <div class="list">${done.map((t) => itemLink(t.cid, t.title, `${t.company} · ${fmtDate(t.completed_at || t.created_at)}`)).join('') || '<p class="muted">Nog niets afgerond.</p>'}</div>
+    ${done.length ? `<h3 style="margin:1.2rem 0 .5rem">Recent afgerond</h3>
+    <div class="list">${done.map((t) => itemLink(t.cid, t.title, `${t.company} · ${fmtDate(t.completed_at || t.created_at)}`)).join('')}</div>` : ''}
   `, 'todos')
 }
 
@@ -538,17 +555,16 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Eén gebruiker, volledige toegang. Geen mail vanuit deze omgeving.</p>
+        <p class="lead">Eén gebruiker. Geen mail vanuit deze omgeving.</p>
       </div>
-      ${plusBar()}
     </div>
     <div class="stack">
       <section class="section">
         <header><h3>Account</h3></header>
         <div class="body kv">
           <dt>E-mail</dt><dd>${esc(session.user.email)}</dd>
-          <dt>Rol</dt><dd>Admin — volledige toegang</dd>
-          <dt>Data</dt><dd>Opgeslagen in het bestaande Fluweel Supabase-project (tabellen <code>nh_*</code>), niet in een extra betaald project.</dd>
+          <dt>Rol</dt><dd>Admin</dd>
+          <dt>Data</dt><dd>Fluweel Supabase, tabellen <code>nh_*</code>.</dd>
         </div>
       </section>
     </div>
@@ -562,8 +578,6 @@ function moneyView() {
   const monthlyCosts = costs.filter((c) => isMonthlyActive(c, today))
   const totalCostOnce = oneOffCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
   const totalCostMonth = monthlyCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
-  const totalAllocOnce = oneOffCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
-  const totalAllocMonth = monthlyCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
   const totalUnlinkedOnce = oneOffCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
   const totalUnlinkedMonth = monthlyCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
   const allRevenues = allRevenuesList()
@@ -600,13 +614,9 @@ function moneyView() {
       ${periods.map(([id, label]) => `<button class="filter ${p === id ? 'active' : ''}" data-go="#/geld?p=${id}">${label}</button>`).join('')}
     </div>
     <div class="grid cards">
-      <div class="card"><h3>Kosten eenmalig</h3><div class="metric bad">${money(totalCostOnce)}</div></div>
-      <div class="card"><h3>Kosten maandelijks</h3><div class="metric bad">${money(totalCostMonth)} /mnd</div><p class="tiny">nu actief</p></div>
-      <div class="card"><h3>Resultaat eenmalig</h3><div class="metric ${totalRevOnce - totalCostOnce >= 0 ? 'good' : 'bad'}">${money(totalRevOnce - totalCostOnce)}</div><p class="tiny">${money(totalRevOnce)} in</p></div>
-      <div class="card"><h3>Resultaat per maand</h3><div class="metric ${totalRevMonth - totalCostMonth >= 0 ? 'good' : 'bad'}">${money(totalRevMonth - totalCostMonth)} /mnd</div><p class="tiny">${money(totalRevMonth)} in</p></div>
-      <div class="card"><h3>Niet gekoppelde kosten</h3><div class="metric">${moneyStack(totalUnlinkedOnce, totalUnlinkedMonth)}</div><p class="tiny">${moneyStack(totalAllocOnce, totalAllocMonth)} verdeeld over klanten</p></div>
-      <div class="card"><h3>Openstaande pipeline</h3><div class="metric">${money(pipeline)}</div><p class="tiny">waarde lopende kansen</p></div>
-      <div class="card"><h3>Geaccepteerde offertes</h3><div class="metric">${money(acceptedQuotes)}</div></div>
+      <div class="card"><h3>Resultaat eenmalig</h3><div class="metric ${totalRevOnce - totalCostOnce >= 0 ? 'good' : 'bad'}">${money(totalRevOnce - totalCostOnce)}</div><p class="tiny">${money(totalRevOnce)} in · ${money(totalCostOnce)} uit</p></div>
+      <div class="card"><h3>Resultaat /mnd</h3><div class="metric ${totalRevMonth - totalCostMonth >= 0 ? 'good' : 'bad'}">${money(totalRevMonth - totalCostMonth)} /mnd</div><p class="tiny">${money(totalRevMonth)} in · ${money(totalCostMonth)} uit</p></div>
+      <div class="card"><h3>Pipeline</h3><div class="metric">${money(pipeline)}</div><p class="tiny">${money(acceptedQuotes)} geaccepteerde offertes${totalUnlinkedOnce || totalUnlinkedMonth ? ' · ' + moneyStack(totalUnlinkedOnce, totalUnlinkedMonth) + ' los' : ''}</p></div>
     </div>
 
     <h3 style="margin:1.4rem 0 .6rem">Per klant</h3>
@@ -615,7 +625,7 @@ function moneyView() {
         <thead><tr><th>Klant</th><th>Opbrengsten</th><th>Kosten</th><th>Saldo</th></tr></thead>
         <tbody>
           ${perCustomer.map((c) => `
-            <tr data-go="#/klanten/${c.id}">
+            <tr data-go="#/klanten/${c.id}?tab=geld">
               <td><b>${esc(c.company_name)}</b></td>
               <td>${moneyStack(c.revOnce, c.revMonth)}</td>
               <td>${moneyStack(c.costOnce, c.costMonth)}</td>
@@ -681,207 +691,201 @@ function moneyView() {
   `, 'money')
 }
 
+function logBar(c) {
+  const person = primaryContact(c)
+  return `
+    <form class="log-bar" data-form="log" data-customer="${c.id}">
+      <select name="type" aria-label="Type">${options(CONTACT_TYPES, 'telefoon')}</select>
+      <select name="contact_name" aria-label="Wie">
+        <option value="">Wie</option>
+        ${c.contacts.map((p) => `<option value="${esc(p.name)}" ${p.id === person?.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select>
+      <input name="summary" required placeholder="Wat is er gebeurd?" autocomplete="off">
+      <button class="btn small" type="submit">Log</button>
+      <button type="button" class="btn ghost small" data-toggle-more>Meer</button>
+      <div class="log-more">
+        <input name="outcome" placeholder="Uitkomst">
+        <input name="follow_up" placeholder="Vervolgactie">
+        <select name="remind" aria-label="Reminder">
+          <option value="">Geen reminder</option>
+          <option value="1">Morgen</option>
+          <option value="7">Over 7 dagen</option>
+          <option value="90">Over 3 maanden</option>
+        </select>
+        <input type="datetime-local" name="occurred_at" value="${esc(localInput(new Date()))}" aria-label="Wanneer">
+      </div>
+    </form>`
+}
+
+function customerTabs(c, tab) {
+  const tabs = [['werk', 'Werk'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Geld']]
+  return `<div class="tabs">${tabs.map(([id, label]) =>
+    `<button type="button" class="tab ${tab === id ? 'active' : ''}" data-go="#/klanten/${c.id}?tab=${id}">${label}</button>`
+  ).join('')}</div>`
+}
+
+function customerWorkTab(c) {
+  const openReminders = c.reminders.filter((r) => !r.done)
+  const openIdeas = c.ideas.filter((i) => !i.converted_todo_id && !i.converted_opportunity_id)
+  const empty = !c.openTodos.length && !c.openOpps.length && !openReminders.length && !openIdeas.length
+  return `
+    ${empty ? '<p class="muted">Niets open. Log contact of voeg een taak toe.</p>' : ''}
+    ${c.openTodos.length ? `<section class="section">
+      <header><h3>Taken</h3><button class="btn ghost small" data-open="todo" data-customer="${c.id}">Toevoegen</button></header>
+      <div class="body list">${c.openTodos.map((t) => `
+        <div class="item" style="cursor:default">
+          <b>${esc(t.title)} <span class="chip ${prioChip(t.priority)}">${esc(t.priority)}</span></b>
+          <small>${t.due_at ? 'Deadline ' + fmtDate(t.due_at) : 'Geen deadline'}${t.note ? ' · ' + esc(t.note) : ''}</small>
+          <div class="actions"><button class="btn ghost small" data-open="todo" data-record="${t.id}" data-customer="${c.id}">Bewerken</button><button class="btn ghost small" data-done="${t.id}">Afronden</button></div>
+        </div>`).join('')}</div>
+    </section>` : ''}
+    ${c.openOpps.length ? `<section class="section">
+      <header><h3>Kansen</h3><button class="btn ghost small" data-open="opp" data-customer="${c.id}">Toevoegen</button></header>
+      <div class="body list">${c.openOpps.map((o) => {
+        const i = PHASE_VALUES.indexOf(o.phase === 'onhold' ? 'verloren' : o.phase)
+        return `<div class="item" style="cursor:default">
+          <b>${esc(o.title)} ${o.is_upsell ? '<span class="chip yellow">upsell</span>' : ''} <span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span></b>
+          <small>${money(o.potential_value)}${o.value_period ? ' ' + esc(o.value_period) : ''} · ${esc(o.next_action || 'geen volgende actie')}${o.next_action_at ? ' · ' + fmtDate(o.next_action_at) : ''}</small>
+          <div class="row-actions" style="margin-top:.45rem">
+            <button type="button" class="btn ghost small" data-open="opp" data-record="${o.id}" data-customer="${c.id}">Bewerken</button>
+            <button class="icon-btn" data-phase="${o.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''}>←</button>
+            <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''}>→</button>
+          </div>
+        </div>`
+      }).join('')}</div>
+    </section>` : ''}
+    ${openReminders.length ? `<section class="section">
+      <header><h3>Herinneringen</h3></header>
+      <div class="body list">${openReminders.map((r) => `
+        <div class="item" style="cursor:default">
+          <b>${esc(r.title)} <span class="chip yellow">${fmtDate(r.remind_at)}</span></b>
+          <div class="actions"><button class="btn ghost small" data-remind-done="${r.id}">Afronden</button></div>
+        </div>`).join('')}</div>
+    </section>` : ''}
+    ${openIdeas.length ? `<section class="section">
+      <header><h3>Ideeën</h3><button class="btn ghost small" data-open="idea" data-customer="${c.id}">Toevoegen</button></header>
+      <div class="body list">${openIdeas.map((i) => `
+        <div class="item" style="cursor:default">
+          <b>${esc(i.title)}</b>
+          <small>${esc(i.body || '')}</small>
+          <div class="actions">
+            <button class="btn ghost small" data-convert="todo" data-idea="${i.id}" data-customer="${c.id}">Maak taak</button>
+            <button class="btn ghost small" data-convert="opp" data-idea="${i.id}" data-customer="${c.id}">Maak kans</button>
+          </div>
+        </div>`).join('')}</div>
+    </section>` : ''}
+    ${empty ? `<p class="tiny" style="margin-top:.35rem">
+      <button class="btn ghost small" data-open="todo" data-customer="${c.id}">Taak</button>
+      <button class="btn ghost small" data-open="opp" data-customer="${c.id}">Kans</button>
+      <button class="btn ghost small" data-open="idea" data-customer="${c.id}">Idee</button>
+    </p>` : ''}`
+}
+
+function customerTimelineTab(c) {
+  const timeline = buildTimeline(c)
+  return `
+    <section class="section">
+      <header><h3>Tijdlijn</h3><button class="btn ghost small" data-open="note" data-customer="${c.id}">Notitie</button></header>
+      <div class="body">
+        ${timeline.length ? `<div class="timeline">${timeline.map((t) => `
+          <article class="tl">
+            <time>${esc(t.when)}</time>
+            <div>
+              <b>${esc(t.title)}</b>
+              <p>${esc(t.body || '')}</p>
+              ${t.logId ? `<div class="actions"><button class="btn ghost small" data-open="activity" data-record="${t.logId}" data-customer="${c.id}">Bewerken</button></div>` : ''}
+            </div>
+          </article>`).join('')}</div>` : '<p class="muted">Nog geen activiteiten. Log hierboven een contact.</p>'}
+      </div>
+    </section>`
+}
+
+function customerDetailsTab(c) {
+  return `
+    <section class="section">
+      <header><h3>Klant</h3></header>
+      <div class="body">
+        <form class="form two" data-form="customer">
+          ${customerForm(c)}
+          <div class="actions field full" style="grid-column:1/-1"><button class="btn" type="submit">Opslaan</button></div>
+        </form>
+      </div>
+    </section>
+    <section class="section">
+      <header><h3>Contactpersonen</h3><button class="btn ghost small" data-open="contact" data-customer="${c.id}">Toevoegen</button></header>
+      <div class="body stack">
+        ${c.contacts.map((p) => `
+          <form class="form two person-form" data-form="contact">
+            <input type="hidden" name="id" value="${esc(p.id)}">
+            <input type="hidden" name="customer_id" value="${esc(c.id)}">
+            <div class="field"><label>Naam</label><input name="name" required value="${esc(p.name)}"></div>
+            <div class="field"><label>Rol</label><input name="role" value="${esc(p.role || '')}"></div>
+            <div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(p.email || '')}"></div>
+            <div class="field"><label>Telefoon</label><input name="phone" value="${esc(p.phone || '')}"></div>
+            <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${p.is_primary ? 'checked' : ''}> Primair contact</label></div>
+            ${contactLinks(p) ? `<p class="tiny field full" style="grid-column:1/-1">${contactLinks(p)}</p>` : ''}
+            <div class="actions field full" style="grid-column:1/-1">
+              <button type="button" class="btn danger small" data-delete="nh_contacts" data-id="${p.id}">Verwijderen</button>
+              <button class="btn" type="submit">Opslaan</button>
+            </div>
+          </form>`).join('') || '<p class="muted">Nog geen contactpersonen.</p>'}
+      </div>
+    </section>`
+}
+
+function customerMoneyTab(c) {
+  return `
+    <section class="section">
+      <header><h3>Offertes</h3><button class="btn ghost small" data-open="quote" data-customer="${c.id}">Toevoegen</button></header>
+      <div class="body list">
+        ${(c.quotes || []).map((q) => {
+          const booked = bookedQuoteIds().has(q.id)
+          return `
+          <div class="item" style="cursor:default">
+            <b>${esc(q.title)}</b>
+            <small>${money(q.amount)} · ${fmtDate(q.issued_at)}${q.valid_until ? ' · geldig tot ' + fmtDate(q.valid_until) : ''}</small>
+            <div class="row-actions" style="margin-top:.45rem">
+              <select data-quote-status="${q.id}" aria-label="Offertestatus">
+                ${options(QUOTE_STATUSES, q.status)}
+              </select>
+              <button type="button" class="btn ghost small" data-open="quote" data-record="${q.id}" data-customer="${c.id}">Bewerken</button>
+              ${q.status === 'geaccepteerd' && !booked ? `<button type="button" class="btn small" data-book-quote="${q.id}">Boek als opbrengst</button>` : ''}
+              ${booked ? '<span class="chip green">geboekt</span>' : ''}
+            </div>
+          </div>`
+        }).join('') || '<p class="muted">Nog geen offertes.</p>'}
+      </div>
+    </section>
+    <section class="section">
+      <header><h3>Opbrengsten & kosten</h3><div class="row-actions"><button class="btn ghost small" data-open="revenue" data-customer="${c.id}">Opbrengst</button><button class="btn ghost small" data-open="cost" data-customer="${c.id}">Kosten</button></div></header>
+      <div class="body">${customerMoneyBlock(c)}</div>
+    </section>`
+}
+
 function customerView(c) {
   const person = primaryContact(c)
-  const timeline = buildTimeline(c)
+  const tab = ['werk', 'tijdlijn', 'gegevens', 'geld'].includes(hash().params.tab) ? hash().params.tab : 'werk'
+  const tabBody = tab === 'tijdlijn' ? customerTimelineTab(c)
+    : tab === 'gegevens' ? customerDetailsTab(c)
+    : tab === 'geld' ? customerMoneyTab(c)
+    : customerWorkTab(c)
   return shell(`
     <div class="page-head">
       <div>
         <p class="tiny"><a href="#/klanten">← Klanten</a></p>
         <h1>${esc(c.company_name)}</h1>
-        <p class="lead">
+        <p class="lead cust-meta">
           <span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span>
-          &nbsp;Laatste contact: <b>${c.lastContactAt ? fmtDateTime(c.lastContactAt) : 'nog geen'}</b>
-          ${c.lastLog ? ` — ${esc(c.lastLog.summary)}` : ''}
+          ${person ? `<span>${esc(person.name)}${contactLinks(person) ? ' · ' + contactLinks(person) : ''}</span>` : '<span class="muted">Geen contactpersoon</span>'}
+          <span class="muted">Laatst ${c.lastContactAt ? fmtDate(c.lastContactAt) : '—'}</span>
+          <span>Volgende ${esc(c.nextAction?.label || '—')}${c.nextAction?.at ? ' · ' + fmtDate(c.nextAction.at) : ''}</span>
         </p>
       </div>
       ${plusBar()}
     </div>
-
-    <div class="grid cards" style="margin-bottom:1rem">
-      <div class="card"><h3>Laatst contact</h3><div class="metric" style="font-size:1.15rem">${c.lastContactAt ? fmtDate(c.lastContactAt) : '—'}</div><p class="tiny">${esc(c.lastLog ? typeLabel(c.lastLog.type) + (person ? ' met ' + person.name : '') : 'Nog geen contactmoment')}</p></div>
-      <div class="card"><h3>Nog te doen</h3><div class="metric">${c.openTodos.length}</div></div>
-      <div class="card"><h3>Kansen</h3><div class="metric">${c.openOpps.length}</div></div>
-      <div class="card"><h3>Volgende actie</h3><div class="metric" style="font-size:1.05rem">${esc(c.nextAction?.label || '—')}</div><p class="tiny">${c.nextAction?.at ? fmtDate(c.nextAction.at) : ''}</p></div>
-    </div>
-
-    <section class="section" style="margin-bottom:1rem">
-      <header><h3>Nieuw contactmoment</h3><span class="tiny">Snel loggen</span></header>
-      <div class="body">
-        <form class="form two" data-form="log" data-customer="${c.id}">
-          <div class="field"><label>Datum en tijd</label><input type="datetime-local" name="occurred_at" value="${esc(localInput(new Date()))}" required></div>
-          <div class="field"><label>Type</label><select name="type">${options(CONTACT_TYPES, 'telefoon')}</select></div>
-          ${contactPersonFields(c, person?.id)}
-          <div class="field"><label>Korte omschrijving</label><input name="summary" required placeholder="Waar ging het over?"></div>
-          <div class="field"><label>Uitkomst</label><input name="outcome" placeholder="Optioneel"></div>
-          <div class="field"><label>Vervolgactie</label><input name="follow_up" placeholder="Bijv. over twee weken bellen"></div>
-          <div class="field"><label>Reminder</label>
-            <select name="remind">
-              <option value="">Geen</option>
-              <option value="1">Morgen</option>
-              <option value="7">Over 7 dagen</option>
-              <option value="90">Over 3 maanden</option>
-            </select>
-          </div>
-          <div class="field" style="justify-content:end"><label>&nbsp;</label><button class="btn" type="submit">Log opslaan</button></div>
-        </form>
-      </div>
-    </section>
-
-    <div class="stack">
-      <section class="section">
-        <header><h3>Tijdlijn</h3></header>
-        <div class="body">
-          ${timeline.length ? `<div class="timeline">${timeline.map((t) => `
-            <article class="tl"><time>${esc(t.when)}</time><div><b>${esc(t.title)}</b><p>${esc(t.body || '')}</p></div></article>`).join('')}</div>` : '<p class="muted">Nog geen activiteiten.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Contactgegevens</h3><span class="tiny">Alles is hier te typen</span></header>
-        <div class="body">
-          <form class="form two" data-form="customer">
-            ${customerForm(c)}
-            <div class="actions field full" style="grid-column:1/-1"><button class="btn" type="submit">Klantgegevens opslaan</button></div>
-          </form>
-          <h3 style="margin:1.3rem 0 .6rem">Contactpersonen</h3>
-          <div class="stack">
-            ${c.contacts.map((p) => `
-              <form class="form two person-form" data-form="contact">
-                <input type="hidden" name="id" value="${esc(p.id)}">
-                <input type="hidden" name="customer_id" value="${esc(c.id)}">
-                <div class="field"><label>Naam</label><input name="name" required value="${esc(p.name)}"></div>
-                <div class="field"><label>Rol</label><input name="role" value="${esc(p.role || '')}"></div>
-                <div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(p.email || '')}"></div>
-                <div class="field"><label>Telefoon</label><input name="phone" value="${esc(p.phone || '')}"></div>
-                <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${p.is_primary ? 'checked' : ''}> Primair contact</label></div>
-                ${contactLinks(p) ? `<p class="tiny field full" style="grid-column:1/-1">${contactLinks(p)}</p>` : ''}
-                <div class="actions field full" style="grid-column:1/-1">
-                  <button type="button" class="btn danger small" data-delete="nh_contacts" data-id="${p.id}">Verwijderen</button>
-                  <button class="btn" type="submit">Opslaan</button>
-                </div>
-              </form>`).join('')}
-            <form class="form two person-form" data-form="contact">
-              <input type="hidden" name="customer_id" value="${esc(c.id)}">
-              <p class="tiny" style="grid-column:1/-1">Nieuwe contactpersoon — typ een naam en sla op.</p>
-              <div class="field"><label>Naam</label><input name="name" required placeholder="Voor- en achternaam"></div>
-              <div class="field"><label>Rol</label><input name="role" placeholder="bijv. eigenaar"></div>
-              <div class="field"><label>E-mail</label><input name="email" type="email"></div>
-              <div class="field"><label>Telefoon</label><input name="phone"></div>
-              <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${c.contacts.length ? '' : 'checked'}> Primair contact</label></div>
-              <div class="actions field full" style="grid-column:1/-1"><button class="btn" type="submit">Contactpersoon toevoegen</button></div>
-            </form>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Contactlog</h3></header>
-        <div class="body">
-          ${c.logs.map((l) => {
-            const who = c.contacts.find((p) => p.id === l.contact_id)
-            return `<div class="item" style="cursor:default">
-              <b>${fmtDateTime(l.occurred_at)} — ${esc(typeLabel(l.type))}${who ? ' met ' + esc(who.name) : ''}</b>
-              <small>${esc(l.summary)}${l.outcome ? ' · Uitkomst: ' + esc(l.outcome) : ''}${l.follow_up ? ' · Vervolg: ' + esc(l.follow_up) : ''}</small>
-              <div class="actions"><button class="btn ghost small" data-open="activity" data-record="${l.id}" data-customer="${c.id}">Bewerken</button></div>
-            </div>`
-          }).join('') || '<p class="muted">Nog geen contactmomenten.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>To-do’s</h3><button class="btn ghost small" data-open="todo" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${c.todos.map((t) => `
-            <div class="item" style="cursor:default">
-              <b>${t.status === 'done' ? '✓ ' : ''}${esc(t.title)} <span class="chip ${prioChip(t.priority)}">${esc(t.priority)}</span></b>
-              <small>${t.due_at ? 'Deadline ' + fmtDate(t.due_at) : 'Geen deadline'}${t.note ? ' · ' + esc(t.note) : ''}</small>
-              ${t.status === 'open' ? `<div class="actions"><button class="btn ghost small" data-open="todo" data-record="${t.id}" data-customer="${c.id}">Bewerken</button><button class="btn ghost small" data-done="${t.id}">Afronden</button></div>` : `<div class="actions"><button class="btn ghost small" data-open="todo" data-record="${t.id}" data-customer="${c.id}">Bewerken</button></div>`}
-            </div>`).join('') || '<p class="muted">Geen to-do’s.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Ideeën</h3><button class="btn ghost small" data-open="idea" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${c.ideas.map((i) => `
-            <div class="item" style="cursor:default">
-              <b>${esc(i.title)}</b>
-              <small>${esc(i.body || '')}</small>
-              ${i.converted_todo_id || i.converted_opportunity_id ? `<small>Omgezet</small>` : `
-                <div class="actions">
-                  <button class="btn ghost small" data-convert="todo" data-idea="${i.id}" data-customer="${c.id}">Maak to-do</button>
-                  <button class="btn ghost small" data-convert="opp" data-idea="${i.id}" data-customer="${c.id}">Maak kans</button>
-                </div>`}
-            </div>`).join('') || '<p class="muted">Nog geen ideeën.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Kansen / upsell</h3><button class="btn ghost small" data-open="opp" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${c.opps.map((o) => {
-            const i = PHASE_VALUES.indexOf(o.phase === 'onhold' ? 'verloren' : o.phase)
-            return `<div class="item" style="cursor:default">
-              <b>${esc(o.title)} ${o.is_upsell ? '<span class="chip yellow">upsell</span>' : ''} <span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span></b>
-              <small>${money(o.potential_value)}${o.value_period ? ' ' + esc(o.value_period) : ''} · ${esc(o.next_action || 'geen volgende actie')}${o.next_action_at ? ' · ' + fmtDate(o.next_action_at) : ''}</small>
-              <div class="row-actions" style="margin-top:.45rem">
-                <button type="button" class="btn ghost small" data-open="opp" data-record="${o.id}" data-customer="${c.id}">Bewerken</button>
-                <button class="icon-btn" data-phase="${o.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''}>←</button>
-                <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''}>→</button>
-              </div>
-            </div>`
-          }).join('') || '<p class="muted">Nog geen kansen.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Notities</h3><button class="btn ghost small" data-open="note" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${c.notes.map((n) => `<div class="item" style="cursor:default"><b>${fmtDateTime(n.created_at)}</b><small>${esc(n.body)}</small></div>`).join('') || '<p class="muted">Nog geen notities.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Reminders</h3><button class="btn ghost small" data-open="reminder" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${c.reminders.map((r) => `
-            <div class="item" style="cursor:default">
-              <b>${esc(r.title)} ${r.done ? '<span class="chip">klaar</span>' : `<span class="chip yellow">${fmtDate(r.remind_at)}</span>`}</b>
-              ${!r.done ? `<div class="actions"><button class="btn ghost small" data-remind-done="${r.id}">Afronden</button></div>` : ''}
-            </div>`).join('') || '<p class="muted">Geen reminders.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Offertes</h3><button class="btn ghost small" data-open="quote" data-customer="${c.id}">Toevoegen</button></header>
-        <div class="body list">
-          ${(c.quotes || []).map((q) => {
-            const booked = bookedQuoteIds().has(q.id)
-            return `
-            <div class="item" style="cursor:default">
-              <b>${esc(q.title)}</b>
-              <small>${money(q.amount)} · ${fmtDate(q.issued_at)}${q.valid_until ? ' · geldig tot ' + fmtDate(q.valid_until) : ''}</small>
-              <div class="row-actions" style="margin-top:.45rem">
-                <select data-quote-status="${q.id}" aria-label="Offertestatus">
-                  ${options(QUOTE_STATUSES, q.status)}
-                </select>
-                <button type="button" class="btn ghost small" data-open="quote" data-record="${q.id}" data-customer="${c.id}">Bewerken</button>
-                ${q.status === 'geaccepteerd' && !booked ? `<button type="button" class="btn small" data-book-quote="${q.id}">Boek als opbrengst</button>` : ''}
-                ${booked ? '<span class="chip green">geboekt</span>' : ''}
-              </div>
-            </div>`
-          }).join('') || '<p class="muted">Nog geen offertes.</p>'}
-        </div>
-      </section>
-
-      <section class="section">
-        <header><h3>Opbrengsten & kosten</h3><div class="row-actions"><button class="btn ghost small" data-open="revenue" data-customer="${c.id}">Opbrengst</button><button class="btn ghost small" data-open="cost">Kosten</button></div></header>
-        <div class="body">
-          ${customerMoneyBlock(c)}
-        </div>
-      </section>
-    </div>
+    ${logBar(c)}
+    ${customerTabs(c, tab)}
+    <div class="stack">${tabBody}</div>
   `, 'customers')
 }
 
@@ -891,22 +895,17 @@ function buildTimeline(c) {
     const who = c.contacts.find((p) => p.id === l.contact_id)
     items.push({
       at: l.occurred_at,
-      when: fmtDate(l.occurred_at),
+      when: fmtDateTime(l.occurred_at),
       title: `${typeLabel(l.type)} ${who ? 'met ' + who.name : ''}`.trim(),
-      body: [l.summary, l.outcome && ('Uitkomst: ' + l.outcome), l.follow_up && ('Vervolg: ' + l.follow_up)].filter(Boolean).join(' ')
+      body: [l.summary, l.outcome && ('Uitkomst: ' + l.outcome), l.follow_up && ('Vervolg: ' + l.follow_up)].filter(Boolean).join(' '),
+      logId: l.id
     })
   }
   for (const t of c.todos.filter((x) => x.status === 'done')) {
-    items.push({ at: t.completed_at || t.created_at, when: fmtDate(t.completed_at || t.created_at), title: 'To-do afgerond', body: t.title })
+    items.push({ at: t.completed_at || t.created_at, when: fmtDate(t.completed_at || t.created_at), title: 'Taak afgerond', body: t.title })
   }
   for (const n of c.notes) {
-    items.push({ at: n.created_at, when: fmtDate(n.created_at), title: 'Notitie', body: n.body })
-  }
-  for (const i of c.ideas) {
-    items.push({ at: i.created_at, when: fmtDate(i.created_at), title: 'Idee: ' + i.title, body: i.body || '' })
-  }
-  for (const o of c.opps) {
-    items.push({ at: o.created_at, when: fmtDate(o.created_at), title: (o.is_upsell ? 'Upsell: ' : 'Kans: ') + o.title, body: phaseLabel(o.phase) })
+    items.push({ at: n.created_at, when: fmtDateTime(n.created_at), title: 'Notitie', body: n.body })
   }
   items.sort((a, b) => new Date(b.at) - new Date(a.at))
   return items
@@ -1205,7 +1204,7 @@ async function onSubmit(e, modal) {
       await refresh()
       modal?.remove()
       flash('Klant opgeslagen')
-      go('#/klanten/' + row.id)
+      go('#/klanten/' + row.id + (hash().params.tab ? '?tab=' + hash().params.tab : ''))
       return
     }
     if (kind === 'contact') {
@@ -1275,7 +1274,7 @@ async function onSubmit(e, modal) {
       const row = await upsert('nh_contact_logs', {
         customer_id: customerId,
         contact_id: contactId,
-        occurred_at: new Date(v.occurred_at).toISOString(),
+        occurred_at: new Date(v.occurred_at || Date.now()).toISOString(),
         type: v.type, summary: v.summary, outcome: v.outcome, follow_up: v.follow_up
       }, id)
       if (!id) await maybeReminder(customerId, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
@@ -1352,6 +1351,13 @@ function bind() {
       : customers.find((c) => c.id === customerId)
     showModal(kind, { customer, customerId: customer?.id || customerId, recordId })
   }))
+  app.querySelectorAll('[data-toggle-more]').forEach((el) => el.addEventListener('click', (e) => {
+    e.preventDefault()
+    const bar = el.closest('.log-bar')
+    if (!bar) return
+    bar.classList.toggle('show-more')
+    el.textContent = bar.classList.contains('show-more') ? 'Minder' : 'Meer'
+  }))
   app.querySelectorAll('[data-plus] .plus-btn').forEach((el) => el.addEventListener('click', (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1385,7 +1391,7 @@ function bind() {
   app.querySelectorAll('[data-done]').forEach((el) => el.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation()
     await upsert('nh_todos', { status: 'done', completed_at: new Date().toISOString() }, el.getAttribute('data-done'))
-    await refresh(); flash('To-do afgerond')
+    await refresh(); flash('Taak afgerond')
   }))
   app.querySelectorAll('[data-remind-done]').forEach((el) => el.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation()
