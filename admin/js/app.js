@@ -504,10 +504,10 @@ function moneyView() {
                     return `${esc(cust?.company_name || '?')} ${money(a.amount)}`
                   }).join('<br>') + (cost.unlinked > 0.009 ? `<div class="tiny">Los: ${money(cost.unlinked)}</div>` : '')
                 : '<span class="chip">niet gekoppeld</span>'}</td>
-              <td class="row-actions">
-                <button class="btn ghost small" data-open="cost" data-record="${cost.id}">Verdelen</button>
-                <button class="btn ghost small" data-unlink="${cost.id}">Alles los</button>
-                <button class="btn danger small" data-delete="nh_costs" data-id="${cost.id}">Verwijder</button>
+              <td class="row-actions" data-stop="1">
+                <button type="button" class="btn ghost small" data-open="cost" data-record="${cost.id}">Verdelen</button>
+                <button type="button" class="btn ghost small" data-unlink="${cost.id}">Alles los</button>
+                <button type="button" class="btn danger small" data-delete="nh_costs" data-id="${cost.id}">Verwijder</button>
               </td>
             </tr>`).join('') || `<tr><td colspan="5" class="muted">Nog geen kosten.</td></tr>`}
         </tbody>
@@ -991,11 +991,26 @@ async function resolveContact(customerId, v) {
 }
 
 function readAllocations(form) {
-  const rows = [...form.querySelectorAll('.alloc-row')]
-  return rows.map((r) => ({
+  const total = Number(form.querySelector('[name="amount"]')?.value || 0)
+  const rows = [...form.querySelectorAll('.alloc-row')].map((r) => ({
     customer_id: r.querySelector('[name="alloc_customer"]').value || null,
     amount: r.querySelector('[name="alloc_amount"]').value
-  })).filter((r) => r.customer_id && Number(r.amount) > 0)
+  })).filter((r) => r.customer_id)
+  const withAmt = rows.filter((r) => Number(r.amount) > 0)
+  const without = rows.filter((r) => !(Number(r.amount) > 0))
+  if (!rows.length) return []
+  if (without.length && !withAmt.length) {
+    const each = Math.round((total / without.length) * 100) / 100
+    return without.map((r, i) => ({
+      customer_id: r.customer_id,
+      amount: i === without.length - 1 ? Math.round((total - each * (without.length - 1)) * 100) / 100 : each
+    }))
+  }
+  if (without.length === 1) {
+    const used = withAmt.reduce((s, r) => s + Number(r.amount), 0)
+    return [...withAmt, { customer_id: without[0].customer_id, amount: Math.max(0, total - used) }]
+  }
+  return withAmt
 }
 
 async function onSubmit(e, modal) {
