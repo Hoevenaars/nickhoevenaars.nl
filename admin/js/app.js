@@ -2,7 +2,7 @@ import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, replaceAllocations,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
@@ -12,6 +12,7 @@ let session = null
 let customers = []
 let costs = []
 let looseRevenues = []
+let looseTodos = []
 let notice = ''
 
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -49,6 +50,88 @@ function moneyStack(oneOff, monthly) {
   if (oneOff) lines.push(money(oneOff))
   if (monthly) lines.push(money(monthly) + ' /mnd')
   return lines.join('<br>') || money(0)
+}
+function periodRange(p) {
+  const now = new Date()
+  if (p === 'jaar') {
+    const y = now.getFullYear()
+    return { start: `${y}-01-01`, end: `${y}-12-31` }
+  }
+  if (p === 'alles') return null
+  const start = new Date(now.getFullYear(), now.getMonth(), 1)
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  return { start: isoDate(start), end: isoDate(end) }
+}
+function inPeriod(dateStr, p) {
+  const range = periodRange(p)
+  if (!range) return true
+  const d = String(dateStr || '').slice(0, 10)
+  return d >= range.start && d <= range.end
+}
+function isMonthlyActive(c, onDate = isoDate()) {
+  if (!isMonthlyCost(c)) return false
+  const start = String(c.incurred_at || '').slice(0, 10)
+  const end = c.ended_at ? String(c.ended_at).slice(0, 10) : null
+  if (start && start > onDate) return false
+  if (end && end < onDate) return false
+  return true
+}
+function moneyPeriod() {
+  const p = hash().params.p || 'maand'
+  return ['maand', 'jaar', 'alles'].includes(p) ? p : 'maand'
+}
+function telHref(phone) {
+  return 'tel:' + String(phone || '').replace(/[^\d+]/g, '')
+}
+function waHref(phone) {
+  let d = String(phone || '').replace(/\D/g, '')
+  if (d.startsWith('00')) d = d.slice(2)
+  if (d.startsWith('0')) d = '31' + d.slice(1)
+  return 'https://wa.me/' + d
+}
+function contactLinks(p) {
+  const bits = []
+  if (p?.email) bits.push(`<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`)
+  if (p?.phone) {
+    bits.push(`<a href="${esc(telHref(p.phone))}">${esc(p.phone)}</a>`)
+    bits.push(`<a href="${esc(waHref(p.phone))}" target="_blank" rel="noopener">WhatsApp</a>`)
+  }
+  return bits.join(' · ')
+}
+function allQuotes() {
+  return customers.flatMap((c) => (c.quotes || []).map((q) => ({ ...q, company: c.company_name, cid: c.id })))
+}
+function allRevenuesList() {
+  return [
+    ...customers.flatMap((c) => (c.revenues || []).map((r) => ({ ...r, company: c.company_name, cid: c.id }))),
+    ...looseRevenues.map((r) => ({ ...r, company: 'Niet gekoppeld', cid: null }))
+  ].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''))
+}
+function bookedQuoteIds() {
+  return new Set(allRevenuesList().map((r) => r.quote_id).filter(Boolean))
+}
+function findOpp(id) {
+  for (const c of customers) {
+    const o = (c.opps || []).find((x) => x.id === id)
+    if (o) return { ...o, cid: c.id }
+  }
+  return null
+}
+function findLog(id) {
+  for (const c of customers) {
+    const l = (c.logs || []).find((x) => x.id === id)
+    if (l) return { ...l, cid: c.id }
+  }
+  return null
+}
+function findTodo(id) {
+  const loose = (looseTodos || []).find((t) => t.id === id)
+  if (loose) return { ...loose, cid: null, company: 'Persoonlijk' }
+  for (const c of customers) {
+    const t = (c.todos || []).find((x) => x.id === id)
+    if (t) return { ...t, cid: c.id, company: c.company_name }
+  }
+  return null
 }
 function hash() {
   const raw = (location.hash || '#/dashboard').replace(/^#/, '')
@@ -121,7 +204,9 @@ function weekRange() {
 }
 
 async function refresh() {
-  ;[customers, costs, looseRevenues] = await Promise.all([loadCustomers(), loadCosts(), loadLooseRevenues()])
+  ;[customers, costs, looseRevenues, looseTodos] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos()
+  ])
 }
 
 function currentCustomerId() {
@@ -171,6 +256,7 @@ function contactPersonFields(c, selectedId) {
 function customerCostShare(customerId, cadence) {
   return costs.reduce((s, cost) => {
     if (cadence && costCadence(cost) !== cadence) return s
+    if (cadence === 'maandelijks' && !isMonthlyActive(cost)) return s
     const a = (cost.allocations || []).find((x) => x.customer_id === customerId)
     return s + Number(a?.amount || 0)
   }, 0)
@@ -188,7 +274,7 @@ function customerMoneyBlock(c) {
       <div class="card"><h3>Per maand</h3><div class="metric ${revMonth - costMonth >= 0 ? 'good' : 'bad'}">${money(revMonth - costMonth)} /mnd</div><p class="tiny">${money(revMonth)} in · ${money(costMonth)} uit</p></div>
     </div>
     <div class="list">
-      ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${moneyWithCadence(r.amount, r.kind)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
+      ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${moneyWithCadence(r.amount, r.kind)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small><div class="actions"><button class="btn ghost small" data-open="revenue" data-record="${r.id}" data-customer="${c.id}">Bewerken</button></div></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
     </div>
     ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten meegerekend: ${linkedCosts.map((x) => `${esc(x.title)} (${cadenceLabel(costCadence(x))})`).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld aan deze klant.</p>'}`
 }
@@ -233,8 +319,10 @@ function loginView(err = '') {
 }
 
 function dashboardView() {
-  const openTodos = customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id })))
-    .sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999'))
+  const openTodos = [
+    ...customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
+    ...looseTodos.filter((t) => t.status === 'open').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
+  ].sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999'))
   const recent = customers.flatMap((c) => c.logs.map((l) => ({ ...l, company: c.company_name, cid: c.id })))
     .sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at)).slice(0, 8)
   const staleList = customers.filter(stale).sort((a, b) => daysSince(b.lastContactAt) - daysSince(a.lastContactAt))
@@ -246,6 +334,10 @@ function dashboardView() {
     .map((r) => ({ ...r, company: c.company_name, cid: c.id })))
     .sort((a, b) => a.remind_at.localeCompare(b.remind_at))
   const today = isoDate()
+  const monthRevOnce = allRevenuesList().reduce((s, r) => s + (r.kind === 'maandelijks' || !inPeriod(r.received_at, 'maand') ? 0 : Number(r.amount || 0)), 0)
+  const monthCostOnce = costs.reduce((s, c) => s + (isMonthlyCost(c) || !inPeriod(c.incurred_at, 'maand') ? 0 : Number(c.amount || 0)), 0)
+  const monthRevRecurring = allRevenuesList().reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
+  const monthCostRecurring = costs.reduce((s, c) => s + (isMonthlyActive(c, today) ? Number(c.amount || 0) : 0), 0)
 
   return shell(`
     <div class="page-head">
@@ -260,6 +352,8 @@ function dashboardView() {
       <div class="card"><h3>Lopende sales</h3><div class="metric">${sales.length}</div></div>
       <div class="card"><h3>Geen recent contact</h3><div class="metric">${staleList.length}<span>≥ 30 dagen</span></div></div>
       <div class="card"><h3>Reminders deze week</h3><div class="metric">${reminders.length}</div></div>
+      <div class="card"><h3>Deze maand eenmalig</h3><div class="metric ${monthRevOnce - monthCostOnce >= 0 ? 'good' : 'bad'}">${money(monthRevOnce - monthCostOnce)}</div><p class="tiny">${money(monthRevOnce)} in · ${money(monthCostOnce)} uit</p></div>
+      <div class="card"><h3>Vaste last /mnd</h3><div class="metric ${monthRevRecurring - monthCostRecurring >= 0 ? 'good' : 'bad'}">${money(monthRevRecurring - monthCostRecurring)} /mnd</div><p class="tiny">${money(monthRevRecurring)} in · ${money(monthCostRecurring)} uit</p></div>
     </div>
     <div class="grid cards" style="margin-top:1rem">
       <section class="card">
@@ -291,7 +385,8 @@ function dashboardView() {
 }
 
 function itemLink(cid, title, sub) {
-  return `<button class="item" data-go="#/klanten/${cid}"><b>${esc(title)}</b><small>${esc(sub)}</small></button>`
+  const href = cid ? `#/klanten/${cid}` : '#/todos'
+  return `<button class="item" data-go="${href}"><b>${esc(title)}</b><small>${esc(sub)}</small></button>`
 }
 function listBlock(arr, fn) {
   if (!arr.length) return `<p class="empty">Niets open.</p>`
@@ -386,6 +481,7 @@ function salesView() {
               <td>${esc(o.next_action || '—')}</td>
               <td>${fmtDate(o.next_action_at)}</td>
               <td class="row-actions" data-stop="1">
+                <button type="button" class="btn ghost small" data-open="opp" data-record="${o.id}" data-customer="${o.cid}">Bewerken</button>
                 <button class="icon-btn" data-phase="${o.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''} title="Vorige fase">←</button>
                 <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''} title="Volgende fase">→</button>
               </td>
@@ -398,16 +494,20 @@ function salesView() {
 }
 
 function todosView() {
-  const open = customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id })))
-    .sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999') || (a.priority === 'hoog' ? -1 : 1))
-  const done = customers.flatMap((c) => c.todos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: c.company_name, cid: c.id })))
-    .sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at)).slice(0, 12)
+  const open = [
+    ...customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
+    ...looseTodos.filter((t) => t.status === 'open').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
+  ].sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999') || (a.priority === 'hoog' ? -1 : 1))
+  const done = [
+    ...customers.flatMap((c) => c.todos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
+    ...looseTodos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
+  ].sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at)).slice(0, 12)
 
   return shell(`
     <div class="page-head">
       <div>
         <h1>To-do’s</h1>
-        <p class="lead">${open.length} openstaand.</p>
+        <p class="lead">${open.length} openstaand. Taken mogen zonder klant.</p>
       </div>
       ${plusBar()}
     <div class="table-wrap">
@@ -415,12 +515,15 @@ function todosView() {
         <thead><tr><th>To-do</th><th>Klant</th><th>Deadline</th><th>Prioriteit</th><th></th></tr></thead>
         <tbody>
           ${open.map((t) => `
-            <tr data-go="#/klanten/${t.cid}">
+            <tr ${t.cid ? `data-go="#/klanten/${t.cid}"` : ''}>
               <td><b>${esc(t.title)}</b>${t.note ? `<div class="tiny">${esc(t.note)}</div>` : ''}</td>
               <td>${esc(t.company)}</td>
               <td>${fmtDate(t.due_at)}</td>
               <td><span class="chip ${prioChip(t.priority)}">${esc(t.priority)}</span></td>
-              <td data-stop="1"><button class="btn ghost small" data-done="${t.id}">Afronden</button></td>
+              <td data-stop="1">
+                <button class="btn ghost small" data-open="todo" data-record="${t.id}" ${t.cid ? `data-customer="${t.cid}"` : ''}>Bewerken</button>
+                <button class="btn ghost small" data-done="${t.id}">Afronden</button>
+              </td>
             </tr>`).join('') || `<tr><td colspan="5" class="muted">Geen open to-do’s.</td></tr>`}
         </tbody>
       </table>
@@ -453,43 +556,52 @@ function settingsView() {
 }
 
 function moneyView() {
-  const oneOffCosts = costs.filter((c) => !isMonthlyCost(c))
-  const monthlyCosts = costs.filter(isMonthlyCost)
+  const p = moneyPeriod()
+  const today = isoDate()
+  const oneOffCosts = costs.filter((c) => !isMonthlyCost(c) && inPeriod(c.incurred_at, p))
+  const monthlyCosts = costs.filter((c) => isMonthlyActive(c, today))
   const totalCostOnce = oneOffCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
   const totalCostMonth = monthlyCosts.reduce((s, c) => s + Number(c.amount || 0), 0)
   const totalAllocOnce = oneOffCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
   const totalAllocMonth = monthlyCosts.reduce((s, c) => s + Number(c.allocated || 0), 0)
   const totalUnlinkedOnce = oneOffCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
   const totalUnlinkedMonth = monthlyCosts.reduce((s, c) => s + Number(c.unlinked || 0), 0)
-  const allRevenues = [
-    ...customers.flatMap((c) => (c.revenues || []).map((r) => ({ ...r, company: c.company_name, cid: c.id }))),
-    ...looseRevenues.map((r) => ({ ...r, company: 'Niet gekoppeld', cid: null }))
-  ].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''))
-  const totalRevOnce = allRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
+  const allRevenues = allRevenuesList()
+  const periodRevenues = allRevenues.filter((r) => r.kind === 'maandelijks' || inPeriod(r.received_at, p))
+  const totalRevOnce = periodRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
   const totalRevMonth = allRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
   const pipeline = customers.flatMap((c) => c.openOpps).reduce((s, o) => s + Number(o.potential_value || 0), 0)
   const acceptedQuotes = customers.flatMap((c) => (c.quotes || []).filter((q) => q.status === 'geaccepteerd'))
     .reduce((s, q) => s + Number(q.amount || 0), 0)
   const perCustomer = customers.map((c) => {
-    const revOnce = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
+    const revOnce = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' || !inPeriod(r.received_at, p) ? 0 : Number(r.amount || 0)), 0)
     const revMonth = (c.revenues || []).reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
-    const costOnce = customerCostShare(c.id, 'eenmalig')
+    const costOnce = costs.reduce((s, cost) => {
+      if (isMonthlyCost(cost) || !inPeriod(cost.incurred_at, p)) return s
+      const a = (cost.allocations || []).find((x) => x.customer_id === c.id)
+      return s + Number(a?.amount || 0)
+    }, 0)
     const costMonth = customerCostShare(c.id, 'maandelijks')
     return { ...c, revOnce, revMonth, costOnce, costMonth, resultOnce: revOnce - costOnce, resultMonth: revMonth - costMonth }
   }).filter((c) => c.revOnce || c.revMonth || c.costOnce || c.costMonth)
     .sort((a, b) => (b.resultOnce - a.resultOnce) || (b.resultMonth - a.resultMonth))
+  const periods = [['maand', 'Deze maand'], ['jaar', 'Dit jaar'], ['alles', 'Alles']]
+  const periodLabel = periods.find((x) => x[0] === p)?.[1] || 'Deze maand'
 
   return shell(`
     <div class="page-head">
       <div>
         <h1>Geld</h1>
-        <p class="lead">Kosten eenmalig of maandelijks. Smeren over klanten of los laten.</p>
+        <p class="lead">Eenmalig over ${periodLabel.toLowerCase()}. Maandlast is wat nu loopt.</p>
       </div>
       ${plusBar()}
     </div>
+    <div class="filters">
+      ${periods.map(([id, label]) => `<button class="filter ${p === id ? 'active' : ''}" data-go="#/geld?p=${id}">${label}</button>`).join('')}
+    </div>
     <div class="grid cards">
       <div class="card"><h3>Kosten eenmalig</h3><div class="metric bad">${money(totalCostOnce)}</div></div>
-      <div class="card"><h3>Kosten maandelijks</h3><div class="metric bad">${money(totalCostMonth)} /mnd</div></div>
+      <div class="card"><h3>Kosten maandelijks</h3><div class="metric bad">${money(totalCostMonth)} /mnd</div><p class="tiny">nu actief</p></div>
       <div class="card"><h3>Resultaat eenmalig</h3><div class="metric ${totalRevOnce - totalCostOnce >= 0 ? 'good' : 'bad'}">${money(totalRevOnce - totalCostOnce)}</div><p class="tiny">${money(totalRevOnce)} in</p></div>
       <div class="card"><h3>Resultaat per maand</h3><div class="metric ${totalRevMonth - totalCostMonth >= 0 ? 'good' : 'bad'}">${money(totalRevMonth - totalCostMonth)} /mnd</div><p class="tiny">${money(totalRevMonth)} in</p></div>
       <div class="card"><h3>Niet gekoppelde kosten</h3><div class="metric">${moneyStack(totalUnlinkedOnce, totalUnlinkedMonth)}</div><p class="tiny">${moneyStack(totalAllocOnce, totalAllocMonth)} verdeeld over klanten</p></div>
@@ -521,12 +633,12 @@ function moneyView() {
       <table>
         <thead><tr><th>Omschrijving</th><th>Soort</th><th>Bedrag</th><th>Datum</th><th>Verdeling</th><th></th></tr></thead>
         <tbody>
-          ${costs.map((cost) => `
+          ${costs.filter((cost) => isMonthlyCost(cost) || inPeriod(cost.incurred_at, p)).map((cost) => `
             <tr>
-              <td><b>${esc(cost.title)}</b><div class="tiny">${esc(cost.category || '')}</div></td>
-              <td><span class="chip">${esc(cadenceLabel(costCadence(cost)))}</span></td>
+              <td><b>${esc(cost.title)}</b><div class="tiny">${esc(cost.category || '')}${cost.ended_at ? ' · gestopt ' + fmtDate(cost.ended_at) : ''}</div></td>
+              <td><span class="chip ${isMonthlyCost(cost) && !isMonthlyActive(cost, today) ? 'red' : ''}">${esc(cadenceLabel(costCadence(cost)))}${isMonthlyCost(cost) && !isMonthlyActive(cost, today) ? ' · gestopt' : ''}</span></td>
               <td>${moneyWithCadence(cost.amount, costCadence(cost))}</td>
-              <td>${isMonthlyCost(cost) ? `<span class="tiny">vanaf</span> ${fmtDate(cost.incurred_at)}` : fmtDate(cost.incurred_at)}</td>
+              <td>${isMonthlyCost(cost) ? `<span class="tiny">vanaf</span> ${fmtDate(cost.incurred_at)}${cost.ended_at ? `<div class="tiny">tot ${fmtDate(cost.ended_at)}</div>` : ''}` : fmtDate(cost.incurred_at)}</td>
               <td>${cost.allocations.length
                 ? cost.allocations.map((a) => {
                     const cust = customers.find((x) => x.id === a.customer_id)
@@ -534,7 +646,7 @@ function moneyView() {
                   }).join('<br>') + (cost.unlinked > 0.009 ? `<div class="tiny">Los: ${moneyWithCadence(cost.unlinked, costCadence(cost))}</div>` : '')
                 : '<span class="chip">niet gekoppeld</span>'}</td>
               <td class="row-actions" data-stop="1">
-                <button type="button" class="btn ghost small" data-open="cost" data-record="${cost.id}">Verdelen</button>
+                <button type="button" class="btn ghost small" data-open="cost" data-record="${cost.id}">Bewerken</button>
                 <button type="button" class="btn ghost small" data-unlink="${cost.id}">Alles los</button>
                 <button type="button" class="btn danger small" data-delete="nh_costs" data-id="${cost.id}">Verwijder</button>
               </td>
@@ -549,16 +661,20 @@ function moneyView() {
     </div>
     <div class="table-wrap static">
       <table>
-        <thead><tr><th>Omschrijving</th><th>Klant</th><th>Bedrag</th><th>Datum</th><th>Soort</th></tr></thead>
+        <thead><tr><th>Omschrijving</th><th>Klant</th><th>Bedrag</th><th>Datum</th><th>Soort</th><th></th></tr></thead>
         <tbody>
-          ${allRevenues.map((r) => `
-            <tr ${r.cid ? `data-go="#/klanten/${r.cid}"` : ''}>
+          ${periodRevenues.map((r) => `
+            <tr>
               <td><b>${esc(r.title)}</b></td>
-              <td>${esc(r.company)}</td>
-              <td>${money(r.amount)}</td>
+              <td>${r.cid ? `<a href="#/klanten/${r.cid}">${esc(r.company)}</a>` : esc(r.company)}</td>
+              <td>${moneyWithCadence(r.amount, r.kind)}</td>
               <td>${fmtDate(r.received_at)}</td>
               <td>${esc(r.kind)}</td>
-            </tr>`).join('') || `<tr><td colspan="5" class="muted">Nog geen opbrengsten. Voeg ze toe via +.</td></tr>`}
+              <td class="row-actions" data-stop="1">
+                <button type="button" class="btn ghost small" data-open="revenue" data-record="${r.id}">Bewerken</button>
+                <button type="button" class="btn danger small" data-delete="nh_revenues" data-id="${r.id}">Verwijder</button>
+              </td>
+            </tr>`).join('') || `<tr><td colspan="6" class="muted">Nog geen opbrengsten in deze periode.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -639,6 +755,7 @@ function customerView(c) {
                 <div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(p.email || '')}"></div>
                 <div class="field"><label>Telefoon</label><input name="phone" value="${esc(p.phone || '')}"></div>
                 <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${p.is_primary ? 'checked' : ''}> Primair contact</label></div>
+                ${contactLinks(p) ? `<p class="tiny field full" style="grid-column:1/-1">${contactLinks(p)}</p>` : ''}
                 <div class="actions field full" style="grid-column:1/-1">
                   <button type="button" class="btn danger small" data-delete="nh_contacts" data-id="${p.id}">Verwijderen</button>
                   <button class="btn" type="submit">Opslaan</button>
@@ -666,6 +783,7 @@ function customerView(c) {
             return `<div class="item" style="cursor:default">
               <b>${fmtDateTime(l.occurred_at)} — ${esc(typeLabel(l.type))}${who ? ' met ' + esc(who.name) : ''}</b>
               <small>${esc(l.summary)}${l.outcome ? ' · Uitkomst: ' + esc(l.outcome) : ''}${l.follow_up ? ' · Vervolg: ' + esc(l.follow_up) : ''}</small>
+              <div class="actions"><button class="btn ghost small" data-open="activity" data-record="${l.id}" data-customer="${c.id}">Bewerken</button></div>
             </div>`
           }).join('') || '<p class="muted">Nog geen contactmomenten.</p>'}
         </div>
@@ -678,7 +796,7 @@ function customerView(c) {
             <div class="item" style="cursor:default">
               <b>${t.status === 'done' ? '✓ ' : ''}${esc(t.title)} <span class="chip ${prioChip(t.priority)}">${esc(t.priority)}</span></b>
               <small>${t.due_at ? 'Deadline ' + fmtDate(t.due_at) : 'Geen deadline'}${t.note ? ' · ' + esc(t.note) : ''}</small>
-              ${t.status === 'open' ? `<div class="actions"><button class="btn ghost small" data-done="${t.id}">Afronden</button></div>` : ''}
+              ${t.status === 'open' ? `<div class="actions"><button class="btn ghost small" data-open="todo" data-record="${t.id}" data-customer="${c.id}">Bewerken</button><button class="btn ghost small" data-done="${t.id}">Afronden</button></div>` : `<div class="actions"><button class="btn ghost small" data-open="todo" data-record="${t.id}" data-customer="${c.id}">Bewerken</button></div>`}
             </div>`).join('') || '<p class="muted">Geen to-do’s.</p>'}
         </div>
       </section>
@@ -708,6 +826,7 @@ function customerView(c) {
               <b>${esc(o.title)} ${o.is_upsell ? '<span class="chip yellow">upsell</span>' : ''} <span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span></b>
               <small>${money(o.potential_value)}${o.value_period ? ' ' + esc(o.value_period) : ''} · ${esc(o.next_action || 'geen volgende actie')}${o.next_action_at ? ' · ' + fmtDate(o.next_action_at) : ''}</small>
               <div class="row-actions" style="margin-top:.45rem">
+                <button type="button" class="btn ghost small" data-open="opp" data-record="${o.id}" data-customer="${c.id}">Bewerken</button>
                 <button class="icon-btn" data-phase="${o.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''}>←</button>
                 <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''}>→</button>
               </div>
@@ -737,11 +856,22 @@ function customerView(c) {
       <section class="section">
         <header><h3>Offertes</h3><button class="btn ghost small" data-open="quote" data-customer="${c.id}">Toevoegen</button></header>
         <div class="body list">
-          ${(c.quotes || []).map((q) => `
+          ${(c.quotes || []).map((q) => {
+            const booked = bookedQuoteIds().has(q.id)
+            return `
             <div class="item" style="cursor:default">
-              <b>${esc(q.title)} <span class="chip">${esc(QUOTE_STATUSES.find((s) => s.id === q.status)?.label || q.status)}</span></b>
+              <b>${esc(q.title)}</b>
               <small>${money(q.amount)} · ${fmtDate(q.issued_at)}${q.valid_until ? ' · geldig tot ' + fmtDate(q.valid_until) : ''}</small>
-            </div>`).join('') || '<p class="muted">Nog geen offertes.</p>'}
+              <div class="row-actions" style="margin-top:.45rem">
+                <select data-quote-status="${q.id}" aria-label="Offertestatus">
+                  ${options(QUOTE_STATUSES, q.status)}
+                </select>
+                <button type="button" class="btn ghost small" data-open="quote" data-record="${q.id}" data-customer="${c.id}">Bewerken</button>
+                ${q.status === 'geaccepteerd' && !booked ? `<button type="button" class="btn small" data-book-quote="${q.id}">Boek als opbrengst</button>` : ''}
+                ${booked ? '<span class="chip green">geboekt</span>' : ''}
+              </div>
+            </div>`
+          }).join('') || '<p class="muted">Nog geen offertes.</p>'}
         </div>
       </section>
 
@@ -864,9 +994,15 @@ function bindAllocUi(root) {
 function showModal(kind, payload = {}) {
   const wrap = document.createElement('div')
   wrap.id = 'modal-root'
-  const customerId = payload.customerId || payload.customer?.id || ''
+  const existingTodo = kind === 'todo' && payload.recordId ? findTodo(payload.recordId) : null
+  const existingOpp = kind === 'opp' && payload.recordId ? findOpp(payload.recordId) : null
+  const existingLog = kind === 'activity' && payload.recordId ? findLog(payload.recordId) : null
+  const existingQuote = kind === 'quote' && payload.recordId ? allQuotes().find((q) => q.id === payload.recordId) : null
+  const existingRev = kind === 'revenue' && payload.recordId ? allRevenuesList().find((r) => r.id === payload.recordId) : null
+  const existingCost = kind === 'cost' && payload.recordId ? costs.find((x) => x.id === payload.recordId) : null
+  const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || ''
   const c = payload.customer || customers.find((x) => x.id === customerId)
-  const needCustomer = !c && ['todo', 'opp', 'contact', 'activity', 'quote'].includes(kind)
+  const needCustomer = !c && ['opp', 'contact', 'activity', 'quote'].includes(kind) && !payload.recordId
   if (kind === 'customer') wrap.innerHTML = modalHtml(payload.customer?.id ? 'Klant bewerken' : 'Nieuwe klant', customerForm(payload.customer || {}), 'customer')
   if (kind === 'contact') wrap.innerHTML = modalHtml('Contactpersoon', `
     ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
@@ -875,33 +1011,35 @@ function showModal(kind, payload = {}) {
     <div class="field"><label>E-mail</label><input name="email" type="email"></div>
     <div class="field"><label>Telefoon</label><input name="phone"></div>
     <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1"> Primair contact</label></div>`, 'contact')
-  if (kind === 'todo') wrap.innerHTML = modalHtml('Taak', `
-    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
-    <div class="field full"><label>Omschrijving</label><input name="title" required></div>
-    <div class="field"><label>Deadline</label><input type="date" name="due_at"></div>
-    <div class="field"><label>Prioriteit</label><select name="priority">${options([{ id: 'laag', label: 'Laag' }, { id: 'normaal', label: 'Normaal' }, { id: 'hoog', label: 'Hoog' }], 'normaal')}</select></div>
-    <div class="field full"><label>Notitie</label><textarea name="note"></textarea></div>
-    <div class="field"><label>Reminder</label>
+  if (kind === 'todo') wrap.innerHTML = modalHtml(existingTodo ? 'Taak bewerken' : 'Taak', `
+    <input type="hidden" name="id" value="${esc(existingTodo?.id || '')}">
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(existingTodo?.cid || customerId, { required: false, allowNone: true })}
+    <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existingTodo?.title || '')}"></div>
+    <div class="field"><label>Deadline</label><input type="date" name="due_at" value="${esc(existingTodo?.due_at || '')}"></div>
+    <div class="field"><label>Prioriteit</label><select name="priority">${options([{ id: 'laag', label: 'Laag' }, { id: 'normaal', label: 'Normaal' }, { id: 'hoog', label: 'Hoog' }], existingTodo?.priority || 'normaal')}</select></div>
+    <div class="field full"><label>Notitie</label><textarea name="note">${esc(existingTodo?.note || '')}</textarea></div>
+    ${existingTodo ? '' : `<div class="field"><label>Reminder</label>
       <select name="remind"><option value="">Geen</option><option value="due">Op deadline</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option></select>
-    </div>`, 'todo')
+    </div>`}`, 'todo')
   if (kind === 'idea') wrap.innerHTML = modalHtml('Idee', `
     <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Idee</label><input name="title" required></div>
     <div class="field full"><label>Toelichting</label><textarea name="body"></textarea></div>`, 'idea')
-  if (kind === 'opp') wrap.innerHTML = modalHtml('Kans / upsell', `
-    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
-    <div class="field full"><label>Omschrijving</label><input name="title" required></div>
-    <div class="field"><label>Potentiële waarde (€)</label><input name="potential_value" type="number" step="1"></div>
-    <div class="field"><label>Periode</label><input name="value_period" placeholder="eenmalig, per maand"></div>
-    <div class="field"><label>Fase</label><select name="phase">${options(PHASES, 'nieuw')}</select></div>
-    <div class="field"><label>Verwachte termijn</label><input type="date" name="expected_at"></div>
-    <div class="field"><label>Volgende actie</label><input name="next_action"></div>
-    <div class="field"><label>Datum volgende actie</label><input type="date" name="next_action_at"></div>
-    <div class="field full"><label>Notities</label><textarea name="notes"></textarea></div>
-    <div class="field full"><label class="check"><input type="checkbox" name="is_upsell" value="1"> Upsell-mogelijkheid</label></div>
-    <div class="field"><label>Reminder</label>
+  if (kind === 'opp') wrap.innerHTML = modalHtml(existingOpp ? 'Kans bewerken' : 'Kans / upsell', `
+    <input type="hidden" name="id" value="${esc(existingOpp?.id || '')}">
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(existingOpp?.cid || customerId)}
+    <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existingOpp?.title || '')}"></div>
+    <div class="field"><label>Potentiële waarde (€)</label><input name="potential_value" type="number" step="1" value="${esc(existingOpp?.potential_value ?? '')}"></div>
+    <div class="field"><label>Periode</label><input name="value_period" placeholder="eenmalig, per maand" value="${esc(existingOpp?.value_period || '')}"></div>
+    <div class="field"><label>Fase</label><select name="phase">${options(PHASES, existingOpp?.phase || 'nieuw')}</select></div>
+    <div class="field"><label>Verwachte termijn</label><input type="date" name="expected_at" value="${esc(existingOpp?.expected_at || '')}"></div>
+    <div class="field"><label>Volgende actie</label><input name="next_action" value="${esc(existingOpp?.next_action || '')}"></div>
+    <div class="field"><label>Datum volgende actie</label><input type="date" name="next_action_at" value="${esc(existingOpp?.next_action_at || '')}"></div>
+    <div class="field full"><label>Notities</label><textarea name="notes">${esc(existingOpp?.notes || '')}</textarea></div>
+    <div class="field full"><label class="check"><input type="checkbox" name="is_upsell" value="1" ${existingOpp?.is_upsell ? 'checked' : ''}> Upsell-mogelijkheid</label></div>
+    ${existingOpp ? '' : `<div class="field"><label>Reminder</label>
       <select name="remind"><option value="">Geen</option><option value="next">Op volgende actie</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option><option value="90">Over 3 maanden</option></select>
-    </div>`, 'opp')
+    </div>`}`, 'opp')
   if (kind === 'note') wrap.innerHTML = modalHtml('Notitie', `
     <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Notitie</label><textarea name="body" required></textarea></div>`, 'note')
@@ -912,37 +1050,42 @@ function showModal(kind, payload = {}) {
     <div class="field"><label>Snel</label>
       <select name="quick"><option value="">Kies datum</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option><option value="90">Over 3 maanden</option></select>
     </div>`, 'reminder')
-  if (kind === 'activity') wrap.innerHTML = modalHtml('Activiteit', `
-    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
-    <div class="field"><label>Datum en tijd</label><input type="datetime-local" name="occurred_at" value="${esc(localInput(new Date()))}" required></div>
-    <div class="field"><label>Type</label><select name="type">${options(CONTACT_TYPES, 'telefoon')}</select></div>
-    ${contactPersonFields(c, primaryContact(c)?.id)}
-    <div class="field full"><label>Korte omschrijving</label><input name="summary" required></div>
-    <div class="field"><label>Uitkomst</label><input name="outcome"></div>
-    <div class="field"><label>Vervolgactie</label><input name="follow_up"></div>`, 'activity')
-  if (kind === 'quote') wrap.innerHTML = modalHtml('Offerte', `
-    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
-    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Website redesign"></div>
-    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01"></div>
-    <div class="field"><label>Status</label><select name="status">${options(QUOTE_STATUSES, 'concept')}</select></div>
-    <div class="field"><label>Datum</label><input type="date" name="issued_at" value="${isoDate()}"></div>
-    <div class="field"><label>Geldig tot</label><input type="date" name="valid_until"></div>
-    <div class="field full"><label>Notities</label><textarea name="notes"></textarea></div>`, 'quote')
-  if (kind === 'revenue') wrap.innerHTML = modalHtml('Opbrengst', `
-    ${customerPicker(customerId, { required: false, allowNone: true })}
-    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Factuur #12"></div>
-    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" required></div>
-    <div class="field"><label>Soort</label><select name="kind">${options(REVENUE_KINDS, 'eenmalig')}</select></div>
-    <div class="field"><label>Ontvangen op</label><input type="date" name="received_at" value="${isoDate()}"></div>
-    <div class="field full"><label>Notities</label><textarea name="notes"></textarea></div>`, 'revenue')
+  if (kind === 'activity') wrap.innerHTML = modalHtml(existingLog ? 'Activiteit bewerken' : 'Activiteit', `
+    <input type="hidden" name="id" value="${esc(existingLog?.id || '')}">
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(existingLog?.cid || customerId)}
+    <div class="field"><label>Datum en tijd</label><input type="datetime-local" name="occurred_at" value="${esc(existingLog ? localInput(new Date(existingLog.occurred_at)) : localInput(new Date()))}" required></div>
+    <div class="field"><label>Type</label><select name="type">${options(CONTACT_TYPES, existingLog?.type || 'telefoon')}</select></div>
+    ${contactPersonFields(c, existingLog?.contact_id || primaryContact(c)?.id)}
+    <div class="field full"><label>Korte omschrijving</label><input name="summary" required value="${esc(existingLog?.summary || '')}"></div>
+    <div class="field"><label>Uitkomst</label><input name="outcome" value="${esc(existingLog?.outcome || '')}"></div>
+    <div class="field"><label>Vervolgactie</label><input name="follow_up" value="${esc(existingLog?.follow_up || '')}"></div>`, 'activity')
+  if (kind === 'quote') wrap.innerHTML = modalHtml(existingQuote ? 'Offerte bewerken' : 'Offerte', `
+    <input type="hidden" name="id" value="${esc(existingQuote?.id || '')}">
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(existingQuote?.cid || customerId)}
+    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Website redesign" value="${esc(existingQuote?.title || '')}"></div>
+    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" value="${esc(existingQuote?.amount ?? '')}"></div>
+    <div class="field"><label>Status</label><select name="status">${options(QUOTE_STATUSES, existingQuote?.status || 'concept')}</select></div>
+    <div class="field"><label>Datum</label><input type="date" name="issued_at" value="${esc(existingQuote?.issued_at || isoDate())}"></div>
+    <div class="field"><label>Geldig tot</label><input type="date" name="valid_until" value="${esc(existingQuote?.valid_until || '')}"></div>
+    <div class="field full"><label>Notities</label><textarea name="notes">${esc(existingQuote?.notes || '')}</textarea></div>`, 'quote')
+  if (kind === 'revenue') wrap.innerHTML = modalHtml(existingRev ? 'Opbrengst bewerken' : 'Opbrengst', `
+    <input type="hidden" name="id" value="${esc(existingRev?.id || '')}">
+    <input type="hidden" name="quote_id" value="${esc(existingRev?.quote_id || '')}">
+    ${customerPicker(existingRev?.cid || customerId, { required: false, allowNone: true })}
+    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Factuur #12" value="${esc(existingRev?.title || '')}"></div>
+    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" required value="${esc(existingRev?.amount ?? '')}"></div>
+    <div class="field"><label>Soort</label><select name="kind">${options(REVENUE_KINDS, existingRev?.kind || 'eenmalig')}</select></div>
+    <div class="field"><label>Ontvangen op</label><input type="date" name="received_at" value="${esc(existingRev?.received_at || isoDate())}"></div>
+    <div class="field full"><label>Notities</label><textarea name="notes">${esc(existingRev?.notes || '')}</textarea></div>`, 'revenue')
   if (kind === 'cost') {
-    const existing = costs.find((x) => x.id === payload.recordId)
-    wrap.innerHTML = modalHtml(existing ? 'Kosten verdelen' : 'Kosten', `
+    const existing = existingCost
+    wrap.innerHTML = modalHtml(existing ? 'Kosten bewerken' : 'Kosten', `
       <input type="hidden" name="id" value="${esc(existing?.id || '')}">
       <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existing?.title || '')}" placeholder="Hosting, tools, inkoop…"></div>
       <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" min="0" required value="${esc(existing?.amount ?? '')}"><p class="tiny">Bij maandelijks: bedrag per maand</p></div>
       <div class="field"><label>Soort</label><select name="cadence">${options(COST_CADENCES, existing?.cadence || 'eenmalig')}</select></div>
       <div class="field"><label>Datum</label><input type="date" name="incurred_at" value="${esc(existing?.incurred_at || isoDate())}"><p class="tiny">Bij maandelijks: startdatum</p></div>
+      <div class="field"><label>Einddatum</label><input type="date" name="ended_at" value="${esc(existing?.ended_at || '')}"><p class="tiny">Alleen maandelijks. Leeg = loopt nog</p></div>
       <div class="field"><label>Categorie</label>
         <input name="category" list="cost-cats" value="${esc(existing?.category || '')}">
         <datalist id="cost-cats">${COST_CATEGORIES.map((x) => `<option value="${esc(x.label)}">`).join('')}</datalist>
@@ -1071,34 +1214,47 @@ async function onSubmit(e, modal) {
       await upsert('nh_contacts', { customer_id: v.customer_id, name: v.name, role: v.role, email: v.email, phone: v.phone, is_primary: !!v.is_primary }, id)
     }
     if (kind === 'todo') {
-      const row = await upsert('nh_todos', { customer_id: v.customer_id, title: v.title, due_at: v.due_at, priority: v.priority || 'normaal', status: 'open', note: v.note })
-      await maybeReminder(v.customer_id, v.title, v.remind, v.due_at, 'todo', row.id)
+      const id = v.id
+      delete v.id
+      const payload = {
+        customer_id: v.customer_id, title: v.title, due_at: v.due_at,
+        priority: v.priority || 'normaal', note: v.note
+      }
+      if (!id) payload.status = 'open'
+      const row = await upsert('nh_todos', payload, id)
+      if (!id) await maybeReminder(v.customer_id, v.title, v.remind, v.due_at, 'todo', row.id)
     }
     if (kind === 'idea') await upsert('nh_ideas', { customer_id: v.customer_id, title: v.title, body: v.body })
     if (kind === 'opp') {
+      const id = v.id
+      delete v.id
       const row = await upsert('nh_opportunities', {
         customer_id: v.customer_id, title: v.title, phase: v.phase || 'nieuw',
         potential_value: v.potential_value ? Number(v.potential_value) : null,
         value_period: v.value_period, expected_at: v.expected_at, next_action: v.next_action,
         next_action_at: v.next_action_at, notes: v.notes, is_upsell: !!v.is_upsell
-      })
-      await maybeReminder(v.customer_id, v.title, v.remind, v.next_action_at, 'opportunity', row.id)
+      }, id)
+      if (!id) await maybeReminder(v.customer_id, v.title, v.remind, v.next_action_at, 'opportunity', row.id)
     }
     if (kind === 'note') await upsert('nh_notes', { customer_id: v.customer_id, body: v.body })
     if (kind === 'reminder') {
       await upsert('nh_reminders', { customer_id: v.customer_id, title: v.title, remind_at: v.remind_at, related_type: 'standalone', done: false })
     }
     if (kind === 'quote') {
+      const id = v.id
+      delete v.id
       await upsert('nh_quotes', {
         customer_id: v.customer_id, title: v.title, amount: v.amount ? Number(v.amount) : null,
         status: v.status || 'concept', issued_at: v.issued_at || isoDate(), valid_until: v.valid_until, notes: v.notes
-      })
+      }, id)
     }
     if (kind === 'revenue') {
+      const id = v.id
+      delete v.id
       await upsert('nh_revenues', {
-        customer_id: v.customer_id, title: v.title, amount: Number(v.amount),
+        customer_id: v.customer_id, quote_id: v.quote_id, title: v.title, amount: Number(v.amount),
         kind: v.kind || 'eenmalig', received_at: v.received_at || isoDate(), notes: v.notes
-      })
+      }, id)
     }
     if (kind === 'cost') {
       const id = v.id
@@ -1106,6 +1262,7 @@ async function onSubmit(e, modal) {
       const row = await upsert('nh_costs', {
         title: v.title, amount: Number(v.amount), incurred_at: v.incurred_at || isoDate(),
         cadence: v.cadence === 'maandelijks' ? 'maandelijks' : 'eenmalig',
+        ended_at: v.cadence === 'maandelijks' ? (v.ended_at || null) : null,
         category: v.category, notes: v.notes
       }, id)
       await replaceAllocations(row.id, readAllocations(form))
@@ -1113,16 +1270,18 @@ async function onSubmit(e, modal) {
     if (kind === 'log' || kind === 'activity') {
       const customerId = form.dataset.customer || v.customer_id
       const contactId = await resolveContact(customerId, v)
+      const id = v.id
+      delete v.id
       const row = await upsert('nh_contact_logs', {
         customer_id: customerId,
         contact_id: contactId,
         occurred_at: new Date(v.occurred_at).toISOString(),
         type: v.type, summary: v.summary, outcome: v.outcome, follow_up: v.follow_up
-      })
-      await maybeReminder(customerId, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
+      }, id)
+      if (!id) await maybeReminder(customerId, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
       modal?.remove()
       await refresh()
-      flash('Contactmoment gelogd')
+      flash(id ? 'Contactmoment aangepast' : 'Contactmoment gelogd')
       return
     }
     modal?.remove()
@@ -1232,6 +1391,30 @@ function bind() {
     e.preventDefault(); e.stopPropagation()
     await upsert('nh_reminders', { done: true }, el.getAttribute('data-remind-done'))
     await refresh(); flash('Reminder klaar')
+  }))
+  app.querySelectorAll('[data-quote-status]').forEach((el) => el.addEventListener('change', async (e) => {
+    e.stopPropagation()
+    await upsert('nh_quotes', { status: el.value }, el.getAttribute('data-quote-status'))
+    await refresh()
+    flash('Offertestatus aangepast')
+  }))
+  app.querySelectorAll('[data-book-quote]').forEach((el) => el.addEventListener('click', async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const q = allQuotes().find((x) => x.id === el.getAttribute('data-book-quote'))
+    if (!q) return
+    if (bookedQuoteIds().has(q.id)) { flash('Al geboekt'); return }
+    await upsert('nh_revenues', {
+      customer_id: q.cid || q.customer_id,
+      quote_id: q.id,
+      title: q.title,
+      amount: Number(q.amount || 0),
+      kind: 'offerte',
+      received_at: isoDate(),
+      notes: q.notes || null
+    })
+    await refresh()
+    flash('Opbrengst geboekt')
   }))
   app.querySelectorAll('[data-convert]').forEach((el) => el.addEventListener('click', async () => {
     const idea = customers.flatMap((c) => c.ideas).find((i) => i.id === el.getAttribute('data-idea'))

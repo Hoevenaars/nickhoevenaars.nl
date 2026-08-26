@@ -107,7 +107,15 @@ th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-s
 tr:last-child td { border-bottom: 0 }
 tbody tr { cursor: pointer }
 tbody tr:hover { background: rgba(59,130,246,.07) }
-.row-actions { display: flex; gap: .3rem; align-items: center; white-space: nowrap }
+.row-actions { display: flex; gap: .3rem; align-items: center; white-space: nowrap; flex-wrap: wrap }
+.row-actions select {
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: .28rem .65rem;
+  font-size: .8rem;
+}
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
