@@ -133,8 +133,8 @@ function loginView(err = '') {
         <h1>Admin</h1>
         <p class="lead">Alleen voor jou. Log in om het klantlogboek te openen.</p>
         <form class="form" data-form="login">
-          <div class="field"><label>E-mail</label><input name="email" type="email" autocomplete="username" required></div>
-          <div class="field"><label>Wachtwoord</label><input name="password" type="password" autocomplete="current-password" required></div>
+          <div class="field"><label for="login-email">E-mail</label><input id="login-email" name="email" type="email" autocomplete="username" required></div>
+          <div class="field"><label for="login-password">Wachtwoord</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
           ${err ? `<p class="err">${esc(err)}</p>` : ''}
           <button class="btn" type="submit">Inloggen</button>
         </form>
@@ -558,7 +558,7 @@ function localInput(d) {
 }
 
 function modalHtml(title, body, formName) {
-  return `<div class="modal-back" data-close="1"><div class="modal" data-stop="1">
+  return `<div class="modal-back"><div class="modal">
     <h2>${esc(title)}</h2>
     <form class="form two" data-form="${formName}">${body}
       <div class="actions full field" style="grid-column:1/-1">
@@ -639,8 +639,10 @@ function showModal(kind, payload = {}) {
     </div>`, 'reminder')
   document.body.appendChild(wrap)
   wrap.addEventListener('click', (e) => {
-    if (e.target.closest('[data-close]')) wrap.remove()
+    if (e.target.classList.contains('modal-back')) wrap.remove()
+    if (e.target.closest('button[data-close]')) wrap.remove()
   })
+  wrap.querySelector('.modal').addEventListener('click', (e) => e.stopPropagation())
   wrap.querySelector('form').addEventListener('submit', (e) => onSubmit(e, wrap))
   const quick = wrap.querySelector('select[name="quick"]')
   if (quick) quick.addEventListener('change', () => {
