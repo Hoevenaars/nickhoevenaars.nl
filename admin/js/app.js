@@ -1,13 +1,17 @@
 import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
+  QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, upsert, remove, setPhase,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, replaceAllocations,
+  upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
 
 const app = document.getElementById('app')
 let session = null
 let customers = []
+let costs = []
+let looseRevenues = []
 let notice = ''
 
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -28,7 +32,7 @@ function fmtDateTime(v) {
 }
 function money(v) {
   if (v == null || v === '') return '—'
-  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(v))
+  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(Number(v))
 }
 function hash() {
   const raw = (location.hash || '#/dashboard').replace(/^#/, '')
@@ -101,7 +105,74 @@ function weekRange() {
 }
 
 async function refresh() {
-  customers = await loadCustomers()
+  ;[customers, costs, looseRevenues] = await Promise.all([loadCustomers(), loadCosts(), loadLooseRevenues()])
+}
+
+function currentCustomerId() {
+  const { parts } = hash()
+  return (parts[0] === 'klanten' && parts[1]) ? parts[1] : ''
+}
+
+function plusBar() {
+  const cid = currentCustomerId()
+  return `
+    <div class="plus" data-plus>
+      <button type="button" class="plus-btn" title="Toevoegen" aria-label="Toevoegen">+</button>
+      <div class="plus-menu">
+        <button type="button" data-open="customer">Nieuwe klant<small>Bedrijf of prospect</small></button>
+        <button type="button" data-open="quote" data-customer="${esc(cid)}">Offerte</button>
+        <button type="button" data-open="activity" data-customer="${esc(cid)}">Activiteit<small>Contactmoment</small></button>
+        <button type="button" data-open="todo" data-customer="${esc(cid)}">Taak</button>
+        <button type="button" data-open="opp" data-customer="${esc(cid)}">Kans / upsell</button>
+        <button type="button" data-open="contact" data-customer="${esc(cid)}">Contactpersoon</button>
+        <button type="button" data-open="cost">Kosten<small>Smeren of los</small></button>
+        <button type="button" data-open="revenue" data-customer="${esc(cid)}">Opbrengst</button>
+      </div>
+    </div>`
+}
+
+function customerPicker(selected, { required = true, allowNone = false, name = 'customer_id' } = {}) {
+  const first = allowNone
+    ? '<option value="">Niet gekoppeld</option>'
+    : '<option value="">Kies klant…</option>'
+  return `<div class="field"><label>Klant</label><select name="${name}" ${required && !allowNone ? 'required' : ''}>${first}${customers.map((c) => `<option value="${esc(c.id)}" ${c.id === selected ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}</select></div>`
+}
+
+function contactPersonFields(c, selectedId) {
+  const person = c?.contacts?.find((p) => p.id === selectedId) || null
+  const listId = 'contacts-' + (c?.id || 'all')
+  const names = (c?.contacts || []).map((p) => `<option value="${esc(p.name)}">`).join('')
+  return `
+    <div class="field"><label>Contactpersoon</label>
+      <input name="contact_name" list="${listId}" placeholder="Typ een naam of kies uit de lijst" value="${esc(person?.name || '')}">
+      <datalist id="${listId}">${names}</datalist>
+    </div>
+    <div class="field"><label>E-mail</label><input name="contact_email" type="email" value="${esc(person?.email || '')}" placeholder="nieuw of bestaand"></div>
+    <div class="field"><label>Telefoon</label><input name="contact_phone" value="${esc(person?.phone || '')}" placeholder="optioneel"></div>
+    <div class="field"><label>Rol</label><input name="contact_role" value="${esc(person?.role || '')}" placeholder="optioneel"></div>`
+}
+
+function customerCostShare(customerId) {
+  return costs.reduce((s, cost) => {
+    const a = (cost.allocations || []).find((x) => x.customer_id === customerId)
+    return s + Number(a?.amount || 0)
+  }, 0)
+}
+
+function customerMoneyBlock(c) {
+  const rev = Number(c.revenueTotal || 0)
+  const cost = customerCostShare(c.id)
+  const linkedCosts = costs.filter((x) => (x.allocations || []).some((a) => a.customer_id === c.id))
+  return `
+    <div class="grid cards" style="margin-bottom:1rem">
+      <div class="card"><h3>Opbrengsten</h3><div class="metric good">${money(rev)}</div></div>
+      <div class="card"><h3>Kosten (aandeel)</h3><div class="metric bad">${money(cost)}</div></div>
+      <div class="card"><h3>Saldo</h3><div class="metric ${rev - cost >= 0 ? 'good' : 'bad'}">${money(rev - cost)}</div></div>
+    </div>
+    <div class="list">
+      ${(c.revenues || []).map((r) => `<div class="item" style="cursor:default"><b>${esc(r.title)}</b><small>${money(r.amount)} · ${fmtDate(r.received_at)} · ${esc(r.kind)}</small></div>`).join('') || '<p class="muted">Nog geen opbrengsten bij deze klant.</p>'}
+    </div>
+    ${linkedCosts.length ? `<p class="tiny" style="margin-top:.8rem">Kosten meegerekend: ${linkedCosts.map((x) => esc(x.title)).join(', ')}</p>` : '<p class="tiny" style="margin-top:.8rem">Geen kosten gekoppeld aan deze klant.</p>'}`
 }
 
 function shell(content, active) {
@@ -113,6 +184,7 @@ function shell(content, active) {
       <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Klanten</button>
       <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Sales</button>
       <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">To-do’s</button>
+      <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Geld</button>
       <button class="nav-btn ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
       <div class="spacer"></div>
       <div class="userbox">Ingelogd als<b>${esc(email)}</b>
@@ -163,7 +235,7 @@ function dashboardView() {
         <h1>Dashboard</h1>
         <p class="lead">Wat aandacht nodig heeft.</p>
       </div>
-      <button class="btn" data-open="customer">Nieuwe klant</button>
+      ${plusBar()}
     </div>
     <div class="grid cards">
       <div class="card"><h3>Open to-do’s</h3><div class="metric">${openTodos.length}</div></div>
@@ -234,7 +306,7 @@ function customersView(params) {
         <h1>Klanten</h1>
         <p class="lead">${rows.length} ${rows.length === 1 ? 'klant' : 'klanten'}</p>
       </div>
-      <button class="btn" data-open="customer">Nieuwe klant</button>
+      ${plusBar()}
     </div>
     <div class="topbar">
       <input class="search" data-search="klanten" value="${esc(params.q || '')}" placeholder="Zoek klant, contactpersoon, notitie, contactmoment of to-do">
@@ -277,7 +349,7 @@ function salesView() {
         <h1>Sales</h1>
         <p class="lead">Eenvoudige lijst, snel een fase opschuiven.</p>
       </div>
-    </div>
+      ${plusBar()}
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -319,7 +391,7 @@ function todosView() {
         <h1>To-do’s</h1>
         <p class="lead">${open.length} openstaand.</p>
       </div>
-    </div>
+      ${plusBar()}
     <div class="table-wrap">
       <table>
         <thead><tr><th>To-do</th><th>Klant</th><th>Deadline</th><th>Prioriteit</th><th></th></tr></thead>
@@ -342,8 +414,13 @@ function todosView() {
 
 function settingsView() {
   return shell(`
-    <h1>Instellingen</h1>
-    <p class="lead">Eén gebruiker, volledige toegang. Geen mail vanuit deze omgeving.</p>
+    <div class="page-head">
+      <div>
+        <h1>Instellingen</h1>
+        <p class="lead">Eén gebruiker, volledige toegang. Geen mail vanuit deze omgeving.</p>
+      </div>
+      ${plusBar()}
+    </div>
     <div class="stack">
       <section class="section">
         <header><h3>Account</h3></header>
@@ -355,6 +432,108 @@ function settingsView() {
       </section>
     </div>
   `, 'settings')
+}
+
+function moneyView() {
+  const totalCost = costs.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const totalAlloc = costs.reduce((s, c) => s + Number(c.allocated || 0), 0)
+  const totalUnlinked = costs.reduce((s, c) => s + Number(c.unlinked || 0), 0)
+  const allRevenues = [
+    ...customers.flatMap((c) => (c.revenues || []).map((r) => ({ ...r, company: c.company_name, cid: c.id }))),
+    ...looseRevenues.map((r) => ({ ...r, company: 'Niet gekoppeld', cid: null }))
+  ].sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''))
+  const totalRev = allRevenues.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const pipeline = customers.flatMap((c) => c.openOpps).reduce((s, o) => s + Number(o.potential_value || 0), 0)
+  const acceptedQuotes = customers.flatMap((c) => (c.quotes || []).filter((q) => q.status === 'geaccepteerd'))
+    .reduce((s, q) => s + Number(q.amount || 0), 0)
+  const perCustomer = customers.map((c) => {
+    const rev = Number(c.revenueTotal || 0)
+    const cost = customerCostShare(c.id)
+    return { ...c, rev, cost, result: rev - cost }
+  }).filter((c) => c.rev || c.cost).sort((a, b) => b.result - a.result)
+
+  return shell(`
+    <div class="page-head">
+      <div>
+        <h1>Geld</h1>
+        <p class="lead">Kosten smeren over klanten of los laten. Opbrengsten per klant of zonder koppeling.</p>
+      </div>
+      ${plusBar()}
+    </div>
+    <div class="grid cards">
+      <div class="card"><h3>Opbrengsten</h3><div class="metric good">${money(totalRev)}</div></div>
+      <div class="card"><h3>Kosten</h3><div class="metric bad">${money(totalCost)}</div></div>
+      <div class="card"><h3>Resultaat</h3><div class="metric ${totalRev - totalCost >= 0 ? 'good' : 'bad'}">${money(totalRev - totalCost)}</div></div>
+      <div class="card"><h3>Niet gekoppelde kosten</h3><div class="metric">${money(totalUnlinked)}</div><p class="tiny">${money(totalAlloc)} is verdeeld over klanten</p></div>
+      <div class="card"><h3>Openstaande pipeline</h3><div class="metric">${money(pipeline)}</div><p class="tiny">waarde lopende kansen</p></div>
+      <div class="card"><h3>Geaccepteerde offertes</h3><div class="metric">${money(acceptedQuotes)}</div></div>
+    </div>
+
+    <h3 style="margin:1.4rem 0 .6rem">Per klant</h3>
+    <div class="table-wrap static">
+      <table>
+        <thead><tr><th>Klant</th><th>Opbrengsten</th><th>Kosten</th><th>Saldo</th></tr></thead>
+        <tbody>
+          ${perCustomer.map((c) => `
+            <tr data-go="#/klanten/${c.id}">
+              <td><b>${esc(c.company_name)}</b></td>
+              <td>${money(c.rev)}</td>
+              <td>${money(c.cost)}</td>
+              <td>${money(c.result)}</td>
+            </tr>`).join('') || `<tr><td colspan="4" class="muted">Nog geen geldstromen per klant.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="page-head" style="margin-top:1.6rem">
+      <h3>Kosten</h3>
+      <button class="btn ghost small" data-open="cost">Kosten toevoegen</button>
+    </div>
+    <div class="table-wrap static">
+      <table>
+        <thead><tr><th>Omschrijving</th><th>Bedrag</th><th>Datum</th><th>Verdeling</th><th></th></tr></thead>
+        <tbody>
+          ${costs.map((cost) => `
+            <tr>
+              <td><b>${esc(cost.title)}</b><div class="tiny">${esc(cost.category || '')}</div></td>
+              <td>${money(cost.amount)}</td>
+              <td>${fmtDate(cost.incurred_at)}</td>
+              <td>${cost.allocations.length
+                ? cost.allocations.map((a) => {
+                    const cust = customers.find((x) => x.id === a.customer_id)
+                    return `${esc(cust?.company_name || '?')} ${money(a.amount)}`
+                  }).join('<br>') + (cost.unlinked > 0.009 ? `<div class="tiny">Los: ${money(cost.unlinked)}</div>` : '')
+                : '<span class="chip">niet gekoppeld</span>'}</td>
+              <td class="row-actions">
+                <button class="btn ghost small" data-open="cost" data-record="${cost.id}">Verdelen</button>
+                <button class="btn ghost small" data-unlink="${cost.id}">Alles los</button>
+                <button class="btn danger small" data-delete="nh_costs" data-id="${cost.id}">Verwijder</button>
+              </td>
+            </tr>`).join('') || `<tr><td colspan="5" class="muted">Nog geen kosten.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="page-head" style="margin-top:1.6rem">
+      <h3>Opbrengsten</h3>
+      <button class="btn ghost small" data-open="revenue">Opbrengst toevoegen</button>
+    </div>
+    <div class="table-wrap static">
+      <table>
+        <thead><tr><th>Omschrijving</th><th>Klant</th><th>Bedrag</th><th>Datum</th><th>Soort</th></tr></thead>
+        <tbody>
+          ${allRevenues.map((r) => `
+            <tr ${r.cid ? `data-go="#/klanten/${r.cid}"` : ''}>
+              <td><b>${esc(r.title)}</b></td>
+              <td>${esc(r.company)}</td>
+              <td>${money(r.amount)}</td>
+              <td>${fmtDate(r.received_at)}</td>
+              <td>${esc(r.kind)}</td>
+            </tr>`).join('') || `<tr><td colspan="5" class="muted">Nog geen opbrengsten. Voeg ze toe via +.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `, 'money')
 }
 
 function customerView(c) {
@@ -371,6 +550,7 @@ function customerView(c) {
           ${c.lastLog ? ` — ${esc(c.lastLog.summary)}` : ''}
         </p>
       </div>
+      ${plusBar()}
     </div>
 
     <div class="grid cards" style="margin-bottom:1rem">
@@ -386,7 +566,7 @@ function customerView(c) {
         <form class="form two" data-form="log" data-customer="${c.id}">
           <div class="field"><label>Datum en tijd</label><input type="datetime-local" name="occurred_at" value="${esc(localInput(new Date()))}" required></div>
           <div class="field"><label>Type</label><select name="type">${options(CONTACT_TYPES, 'telefoon')}</select></div>
-          <div class="field"><label>Contactpersoon</label><select name="contact_id">${options(c.contacts.map((p) => ({ id: p.id, label: p.name })), person?.id, [{ id: '', label: '—' }])}</select></div>
+          ${contactPersonFields(c, person?.id)}
           <div class="field"><label>Korte omschrijving</label><input name="summary" required placeholder="Waar ging het over?"></div>
           <div class="field"><label>Uitkomst</label><input name="outcome" placeholder="Optioneel"></div>
           <div class="field"><label>Vervolgactie</label><input name="follow_up" placeholder="Bijv. over twee weken bellen"></div>
@@ -413,23 +593,39 @@ function customerView(c) {
       </section>
 
       <section class="section">
-        <header><h3>Contactgegevens</h3><button class="btn ghost small" data-open="contact" data-customer="${c.id}">Persoon toevoegen</button></header>
+        <header><h3>Contactgegevens</h3><span class="tiny">Alles is hier te typen</span></header>
         <div class="body">
-          <dl class="kv">
-            <dt>Bedrijf</dt><dd>${esc(c.company_name)}</dd>
-            <dt>Website</dt><dd>${c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a>` : '—'}</dd>
-            <dt>Adres</dt><dd>${esc(c.address || '—')}</dd>
-            <dt>Status</dt><dd>${esc(statusLabel(c.status))}</dd>
-            <dt>Extra notities</dt><dd>${esc(c.extra_notes || '—')}</dd>
-          </dl>
-          <div class="list" style="margin-top:1rem">
+          <form class="form two" data-form="customer">
+            ${customerForm(c)}
+            <div class="actions field full" style="grid-column:1/-1"><button class="btn" type="submit">Klantgegevens opslaan</button></div>
+          </form>
+          <h3 style="margin:1.3rem 0 .6rem">Contactpersonen</h3>
+          <div class="stack">
             ${c.contacts.map((p) => `
-              <div class="item" style="cursor:default">
-                <b>${esc(p.name)} ${p.is_primary ? '<span class="chip blue">primair</span>' : ''}</b>
-                <small>${[p.role, p.email, p.phone].filter(Boolean).map(esc).join(' · ') || 'Geen contactgegevens'}</small>
-              </div>`).join('') || '<p class="muted">Nog geen contactpersonen.</p>'}
+              <form class="form two person-form" data-form="contact">
+                <input type="hidden" name="id" value="${esc(p.id)}">
+                <input type="hidden" name="customer_id" value="${esc(c.id)}">
+                <div class="field"><label>Naam</label><input name="name" required value="${esc(p.name)}"></div>
+                <div class="field"><label>Rol</label><input name="role" value="${esc(p.role || '')}"></div>
+                <div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(p.email || '')}"></div>
+                <div class="field"><label>Telefoon</label><input name="phone" value="${esc(p.phone || '')}"></div>
+                <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${p.is_primary ? 'checked' : ''}> Primair contact</label></div>
+                <div class="actions field full" style="grid-column:1/-1">
+                  <button type="button" class="btn danger small" data-delete="nh_contacts" data-id="${p.id}">Verwijderen</button>
+                  <button class="btn" type="submit">Opslaan</button>
+                </div>
+              </form>`).join('')}
+            <form class="form two person-form" data-form="contact">
+              <input type="hidden" name="customer_id" value="${esc(c.id)}">
+              <p class="tiny" style="grid-column:1/-1">Nieuwe contactpersoon — typ een naam en sla op.</p>
+              <div class="field"><label>Naam</label><input name="name" required placeholder="Voor- en achternaam"></div>
+              <div class="field"><label>Rol</label><input name="role" placeholder="bijv. eigenaar"></div>
+              <div class="field"><label>E-mail</label><input name="email" type="email"></div>
+              <div class="field"><label>Telefoon</label><input name="phone"></div>
+              <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1" ${c.contacts.length ? '' : 'checked'}> Primair contact</label></div>
+              <div class="actions field full" style="grid-column:1/-1"><button class="btn" type="submit">Contactpersoon toevoegen</button></div>
+            </form>
           </div>
-          <div class="actions"><button class="btn ghost small" data-open="customer" data-id="${c.id}">Gegevens bewerken</button></div>
         </div>
       </section>
 
@@ -510,15 +706,20 @@ function customerView(c) {
       </section>
 
       <section class="section">
-        <header><h3>Prijs- en facturatieafspraken</h3><button class="btn ghost small" data-open="customer" data-id="${c.id}">Bewerken</button></header>
-        <div class="body kv">
-          <dt>Tarief / prijsafspraak</dt><dd>${esc(c.price_arrangement || '—')}</dd>
-          <dt>Korting</dt><dd>${esc(c.discount || '—')}</dd>
-          <dt>Type</dt><dd>${esc(c.billing_type || '—')}</dd>
-          <dt>Facturatie</dt><dd>${esc(c.billing_frequency || '—')}</dd>
-          <dt>Betalingstermijn</dt><dd>${esc(c.payment_terms || '—')}</dd>
-          <dt>Facturatie-e-mail</dt><dd>${esc(c.billing_email || '—')}</dd>
-          <dt>Bijzonderheden</dt><dd>${esc(c.billing_notes || '—')}</dd>
+        <header><h3>Offertes</h3><button class="btn ghost small" data-open="quote" data-customer="${c.id}">Toevoegen</button></header>
+        <div class="body list">
+          ${(c.quotes || []).map((q) => `
+            <div class="item" style="cursor:default">
+              <b>${esc(q.title)} <span class="chip">${esc(QUOTE_STATUSES.find((s) => s.id === q.status)?.label || q.status)}</span></b>
+              <small>${money(q.amount)} · ${fmtDate(q.issued_at)}${q.valid_until ? ' · geldig tot ' + fmtDate(q.valid_until) : ''}</small>
+            </div>`).join('') || '<p class="muted">Nog geen offertes.</p>'}
+        </div>
+      </section>
+
+      <section class="section">
+        <header><h3>Opbrengsten & kosten</h3><div class="row-actions"><button class="btn ghost small" data-open="revenue" data-customer="${c.id}">Opbrengst</button><button class="btn ghost small" data-open="cost">Kosten</button></div></header>
+        <div class="body">
+          ${customerMoneyBlock(c)}
         </div>
       </section>
     </div>
@@ -588,20 +789,65 @@ function customerForm(c = {}) {
     <div class="field full"><label>Bijzonderheden facturatie</label><textarea name="billing_notes">${esc(c.billing_notes || '')}</textarea></div>`
 }
 
+function allocRowHtml(row = {}) {
+  return `<div class="alloc-row">
+    <div class="field"><label>Klant</label>
+      <select name="alloc_customer">
+        <option value="">—</option>
+        ${customers.map((c) => `<option value="${esc(c.id)}" ${c.id === row.customer_id ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Bedrag €</label><input name="alloc_amount" type="number" step="0.01" min="0" value="${esc(row.amount ?? '')}"></div>
+    <button type="button" class="icon-btn" data-del-alloc title="Loskoppelen">×</button>
+  </div>`
+}
+
+function bindAllocUi(root) {
+  const box = root.querySelector('[data-allocs]')
+  if (!box) return
+  const rebind = () => {
+    box.querySelectorAll('[data-del-alloc]').forEach((btn) => {
+      btn.onclick = () => { btn.closest('.alloc-row')?.remove() }
+    })
+  }
+  root.querySelector('[data-add-alloc]')?.addEventListener('click', () => {
+    box.insertAdjacentHTML('beforeend', allocRowHtml())
+    rebind()
+  })
+  root.querySelector('[data-clear-alloc]')?.addEventListener('click', () => {
+    box.innerHTML = allocRowHtml()
+    rebind()
+  })
+  root.querySelector('[data-split-alloc]')?.addEventListener('click', () => {
+    const total = Number(root.querySelector('[name="amount"]')?.value || 0)
+    const rows = [...box.querySelectorAll('.alloc-row')].filter((r) => r.querySelector('[name="alloc_customer"]').value)
+    if (!rows.length || !total) return
+    const each = Math.round((total / rows.length) * 100) / 100
+    rows.forEach((r, i) => {
+      r.querySelector('[name="alloc_amount"]').value = i === rows.length - 1
+        ? Math.round((total - each * (rows.length - 1)) * 100) / 100
+        : each
+    })
+  })
+  rebind()
+}
+
 function showModal(kind, payload = {}) {
   const wrap = document.createElement('div')
   wrap.id = 'modal-root'
-  const c = payload.customerId ? customers.find((x) => x.id === payload.customerId) : payload.customer
+  const customerId = payload.customerId || payload.customer?.id || ''
+  const c = payload.customer || customers.find((x) => x.id === customerId)
+  const needCustomer = !c && ['todo', 'opp', 'contact', 'activity', 'quote'].includes(kind)
   if (kind === 'customer') wrap.innerHTML = modalHtml(payload.customer?.id ? 'Klant bewerken' : 'Nieuwe klant', customerForm(payload.customer || {}), 'customer')
   if (kind === 'contact') wrap.innerHTML = modalHtml('Contactpersoon', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
-    <div class="field"><label>Naam</label><input name="name" required></div>
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
+    <div class="field"><label>Naam</label><input name="name" required placeholder="Typ de naam"></div>
     <div class="field"><label>Rol</label><input name="role"></div>
     <div class="field"><label>E-mail</label><input name="email" type="email"></div>
     <div class="field"><label>Telefoon</label><input name="phone"></div>
     <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1"> Primair contact</label></div>`, 'contact')
-  if (kind === 'todo') wrap.innerHTML = modalHtml('To-do', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
+  if (kind === 'todo') wrap.innerHTML = modalHtml('Taak', `
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
     <div class="field full"><label>Omschrijving</label><input name="title" required></div>
     <div class="field"><label>Deadline</label><input type="date" name="due_at"></div>
     <div class="field"><label>Prioriteit</label><select name="priority">${options([{ id: 'laag', label: 'Laag' }, { id: 'normaal', label: 'Normaal' }, { id: 'hoog', label: 'Hoog' }], 'normaal')}</select></div>
@@ -610,11 +856,11 @@ function showModal(kind, payload = {}) {
       <select name="remind"><option value="">Geen</option><option value="due">Op deadline</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option></select>
     </div>`, 'todo')
   if (kind === 'idea') wrap.innerHTML = modalHtml('Idee', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
+    <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Idee</label><input name="title" required></div>
     <div class="field full"><label>Toelichting</label><textarea name="body"></textarea></div>`, 'idea')
   if (kind === 'opp') wrap.innerHTML = modalHtml('Kans / upsell', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
     <div class="field full"><label>Omschrijving</label><input name="title" required></div>
     <div class="field"><label>Potentiële waarde (€)</label><input name="potential_value" type="number" step="1"></div>
     <div class="field"><label>Periode</label><input name="value_period" placeholder="eenmalig, per maand"></div>
@@ -628,15 +874,66 @@ function showModal(kind, payload = {}) {
       <select name="remind"><option value="">Geen</option><option value="next">Op volgende actie</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option><option value="90">Over 3 maanden</option></select>
     </div>`, 'opp')
   if (kind === 'note') wrap.innerHTML = modalHtml('Notitie', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
+    <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Notitie</label><textarea name="body" required></textarea></div>`, 'note')
   if (kind === 'reminder') wrap.innerHTML = modalHtml('Reminder', `
-    <input type="hidden" name="customer_id" value="${esc(payload.customerId)}">
+    <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Waarvoor</label><input name="title" required placeholder="Morgen bellen"></div>
     <div class="field"><label>Wanneer</label><input type="date" name="remind_at" required value="${isoDate()}"></div>
     <div class="field"><label>Snel</label>
       <select name="quick"><option value="">Kies datum</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option><option value="90">Over 3 maanden</option></select>
     </div>`, 'reminder')
+  if (kind === 'activity') wrap.innerHTML = modalHtml('Activiteit', `
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
+    <div class="field"><label>Datum en tijd</label><input type="datetime-local" name="occurred_at" value="${esc(localInput(new Date()))}" required></div>
+    <div class="field"><label>Type</label><select name="type">${options(CONTACT_TYPES, 'telefoon')}</select></div>
+    ${contactPersonFields(c, primaryContact(c)?.id)}
+    <div class="field full"><label>Korte omschrijving</label><input name="summary" required></div>
+    <div class="field"><label>Uitkomst</label><input name="outcome"></div>
+    <div class="field"><label>Vervolgactie</label><input name="follow_up"></div>`, 'activity')
+  if (kind === 'quote') wrap.innerHTML = modalHtml('Offerte', `
+    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
+    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Website redesign"></div>
+    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01"></div>
+    <div class="field"><label>Status</label><select name="status">${options(QUOTE_STATUSES, 'concept')}</select></div>
+    <div class="field"><label>Datum</label><input type="date" name="issued_at" value="${isoDate()}"></div>
+    <div class="field"><label>Geldig tot</label><input type="date" name="valid_until"></div>
+    <div class="field full"><label>Notities</label><textarea name="notes"></textarea></div>`, 'quote')
+  if (kind === 'revenue') wrap.innerHTML = modalHtml('Opbrengst', `
+    ${customerPicker(customerId, { required: false, allowNone: true })}
+    <div class="field full"><label>Omschrijving</label><input name="title" required placeholder="Factuur #12"></div>
+    <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" required></div>
+    <div class="field"><label>Soort</label><select name="kind">${options(REVENUE_KINDS, 'eenmalig')}</select></div>
+    <div class="field"><label>Ontvangen op</label><input type="date" name="received_at" value="${isoDate()}"></div>
+    <div class="field full"><label>Notities</label><textarea name="notes"></textarea></div>`, 'revenue')
+  if (kind === 'cost') {
+    const existing = costs.find((x) => x.id === payload.recordId)
+    wrap.innerHTML = modalHtml(existing ? 'Kosten verdelen' : 'Kosten', `
+      <input type="hidden" name="id" value="${esc(existing?.id || '')}">
+      <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existing?.title || '')}" placeholder="Hosting, tools, inkoop…"></div>
+      <div class="field"><label>Bedrag €</label><input name="amount" type="number" step="0.01" min="0" required value="${esc(existing?.amount ?? '')}"></div>
+      <div class="field"><label>Datum</label><input type="date" name="incurred_at" value="${esc(existing?.incurred_at || isoDate())}"></div>
+      <div class="field"><label>Categorie</label>
+        <input name="category" list="cost-cats" value="${esc(existing?.category || '')}">
+        <datalist id="cost-cats">${COST_CATEGORIES.map((x) => `<option value="${esc(x.label)}">`).join('')}</datalist>
+      </div>
+      <div class="field full"><label>Notities</label><textarea name="notes">${esc(existing?.notes || '')}</textarea></div>
+      <div class="field full">
+        <label>Verdeling over klanten</label>
+        <p class="tiny">Leeg = niet gekoppeld. Bedragen mag je uitsmeren; rest blijft los.</p>
+        <div data-allocs>${(existing?.allocations?.length ? existing.allocations : [{ customer_id: customerId || '', amount: '' }]).map(allocRowHtml).join('')}</div>
+        <div class="actions">
+          <button type="button" class="btn ghost small" data-add-alloc>Klant toevoegen</button>
+          <button type="button" class="btn ghost small" data-split-alloc>Verdeel gelijk</button>
+          <button type="button" class="btn ghost small" data-clear-alloc>Alles loskoppelen</button>
+        </div>
+      </div>`, 'cost')
+    wrap.querySelector('.modal').classList.add('wide')
+  }
+  if (!wrap.innerHTML) return
+  if (needCustomer && kind !== 'customer' && !c && !wrap.querySelector('[name="customer_id"]')) {
+    /* picker already included */
+  }
   document.body.appendChild(wrap)
   wrap.addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-back')) wrap.remove()
@@ -648,6 +945,7 @@ function showModal(kind, payload = {}) {
   if (quick) quick.addEventListener('change', () => {
     if (quick.value) wrap.querySelector('[name="remind_at"]').value = addDays(Number(quick.value))
   })
+  bindAllocUi(wrap)
 }
 
 function fd(form) {
@@ -664,6 +962,40 @@ async function maybeReminder(customerId, title, remind, dueAt, relatedType, rela
   else at = addDays(Number(remind))
   if (!at) return
   await upsert('nh_reminders', { customer_id: customerId, title, remind_at: at, related_type: relatedType, related_id: relatedId, done: false })
+}
+
+async function resolveContact(customerId, v) {
+  const name = (v.contact_name || '').trim()
+  if (!name || !customerId) return null
+  const cust = customers.find((x) => x.id === customerId)
+  let person = cust?.contacts.find((p) => p.name.toLowerCase() === name.toLowerCase())
+  const payload = {
+    customer_id: customerId,
+    name,
+    email: v.contact_email || null,
+    phone: v.contact_phone || null,
+    role: v.contact_role || null
+  }
+  if (person) {
+    const next = {
+      ...payload,
+      email: v.contact_email || person.email || null,
+      phone: v.contact_phone || person.phone || null,
+      role: v.contact_role || person.role || null
+    }
+    await upsert('nh_contacts', next, person.id)
+    return person.id
+  }
+  const row = await upsert('nh_contacts', { ...payload, is_primary: !(cust?.contacts?.length) })
+  return row.id
+}
+
+function readAllocations(form) {
+  const rows = [...form.querySelectorAll('.alloc-row')]
+  return rows.map((r) => ({
+    customer_id: r.querySelector('[name="alloc_customer"]').value || null,
+    amount: r.querySelector('[name="alloc_amount"]').value
+  })).filter((r) => r.customer_id && Number(r.amount) > 0)
 }
 
 async function onSubmit(e, modal) {
@@ -689,7 +1021,9 @@ async function onSubmit(e, modal) {
       return
     }
     if (kind === 'contact') {
-      await upsert('nh_contacts', { ...v, is_primary: !!v.is_primary })
+      const id = v.id
+      delete v.id
+      await upsert('nh_contacts', { customer_id: v.customer_id, name: v.name, role: v.role, email: v.email, phone: v.phone, is_primary: !!v.is_primary }, id)
     }
     if (kind === 'todo') {
       const row = await upsert('nh_todos', { customer_id: v.customer_id, title: v.title, due_at: v.due_at, priority: v.priority || 'normaal', status: 'open', note: v.note })
@@ -709,14 +1043,38 @@ async function onSubmit(e, modal) {
     if (kind === 'reminder') {
       await upsert('nh_reminders', { customer_id: v.customer_id, title: v.title, remind_at: v.remind_at, related_type: 'standalone', done: false })
     }
-    if (kind === 'log') {
+    if (kind === 'quote') {
+      await upsert('nh_quotes', {
+        customer_id: v.customer_id, title: v.title, amount: v.amount ? Number(v.amount) : null,
+        status: v.status || 'concept', issued_at: v.issued_at || isoDate(), valid_until: v.valid_until, notes: v.notes
+      })
+    }
+    if (kind === 'revenue') {
+      await upsert('nh_revenues', {
+        customer_id: v.customer_id, title: v.title, amount: Number(v.amount),
+        kind: v.kind || 'eenmalig', received_at: v.received_at || isoDate(), notes: v.notes
+      })
+    }
+    if (kind === 'cost') {
+      const id = v.id
+      delete v.id
+      const row = await upsert('nh_costs', {
+        title: v.title, amount: Number(v.amount), incurred_at: v.incurred_at || isoDate(),
+        category: v.category, notes: v.notes
+      }, id)
+      await replaceAllocations(row.id, readAllocations(form))
+    }
+    if (kind === 'log' || kind === 'activity') {
+      const customerId = form.dataset.customer || v.customer_id
+      const contactId = await resolveContact(customerId, v)
       const row = await upsert('nh_contact_logs', {
-        customer_id: form.dataset.customer,
-        contact_id: v.contact_id,
+        customer_id: customerId,
+        contact_id: contactId,
         occurred_at: new Date(v.occurred_at).toISOString(),
         type: v.type, summary: v.summary, outcome: v.outcome, follow_up: v.follow_up
       })
-      await maybeReminder(form.dataset.customer, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
+      await maybeReminder(customerId, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
+      modal?.remove()
       await refresh()
       flash('Contactmoment gelogd')
       return
@@ -740,6 +1098,7 @@ async function paint() {
   } else if (page === 'klanten') app.innerHTML = customersView(params)
   else if (page === 'sales') app.innerHTML = salesView()
   else if (page === 'todos') app.innerHTML = todosView()
+  else if (page === 'geld') app.innerHTML = moneyView()
   else if (page === 'instellingen') app.innerHTML = settingsView()
   else app.innerHTML = dashboardView()
   bind()
@@ -776,12 +1135,37 @@ function bind() {
     bind()
   }))
   app.querySelectorAll('form[data-form]').forEach((f) => f.addEventListener('submit', (e) => onSubmit(e)))
-  app.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => {
+  app.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    document.querySelectorAll('[data-plus]').forEach((p) => p.classList.remove('open'))
     const kind = el.getAttribute('data-open')
-    const id = el.getAttribute('data-id')
-    const customerId = el.getAttribute('data-customer')
-    const customer = id ? customers.find((c) => c.id === id) : null
-    showModal(kind, { customer, customerId })
+    const customerId = el.getAttribute('data-customer') || currentCustomerId()
+    const recordId = el.getAttribute('data-record')
+    const customer = (kind === 'customer' && el.getAttribute('data-id'))
+      ? customers.find((c) => c.id === el.getAttribute('data-id'))
+      : customers.find((c) => c.id === customerId)
+    showModal(kind, { customer, customerId: customer?.id || customerId, recordId })
+  }))
+  app.querySelectorAll('[data-plus] .plus-btn').forEach((el) => el.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    el.closest('[data-plus]').classList.toggle('open')
+  }))
+  app.querySelectorAll('[data-delete]').forEach((el) => el.addEventListener('click', async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm('Zeker weten verwijderen?')) return
+    await remove(el.getAttribute('data-delete'), el.getAttribute('data-id'))
+    await refresh()
+    flash('Verwijderd')
+  }))
+  app.querySelectorAll('[data-unlink]').forEach((el) => el.addEventListener('click', async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    await replaceAllocations(el.getAttribute('data-unlink'), [])
+    await refresh()
+    flash('Kosten losgekoppeld')
   }))
   app.querySelectorAll('[data-phase]').forEach((el) => el.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation()
@@ -839,4 +1223,8 @@ async function boot() {
 }
 
 window.addEventListener('hashchange', () => { if (session) paint() })
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-plus]')) return
+  document.querySelectorAll('[data-plus].open').forEach((el) => el.classList.remove('open'))
+})
 boot()
