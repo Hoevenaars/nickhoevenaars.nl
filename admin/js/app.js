@@ -2,7 +2,7 @@ import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, sendMailApi, replaceAllocations,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
@@ -14,6 +14,7 @@ let costs = []
 let looseRevenues = []
 let looseTodos = []
 let emails = []
+let mailTemplates = []
 let notice = ''
 
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -237,8 +238,8 @@ function companyForMail(m) {
 }
 
 async function refresh() {
-  ;[customers, costs, looseRevenues, looseTodos, emails] = await Promise.all([
-    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails()
+  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates()
   ])
   attachEmails()
 }
@@ -336,7 +337,7 @@ function shell(content, active) {
       <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">Taken</button>
       <button class="nav-btn ${active === 'mail' ? 'active' : ''}" data-go="#/mail">Mail${unreadMailCount() ? ` <span class="chip blue">${unreadMailCount()}</span>` : ''}</button>
       <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Geld</button>
-      <button class="nav-btn nav-settings ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
+      <button class="nav-btn ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
       <div class="spacer"></div>
       <div class="userbox">
         <button type="button" class="who" data-go="#/instellingen">Ingelogd als<b>${esc(email)}</b></button>
@@ -601,7 +602,7 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Eén gebruiker. Mail via Resend vanuit deze admin; TransIP blijft de mailbox-backup.</p>
+        <p class="lead">Account en mailtemplates. Later komt hier meer.</p>
       </div>
     </div>
     <div class="stack">
@@ -616,9 +617,20 @@ function settingsView() {
         </div>
       </section>
       <section class="section">
-        <header><h3>Mail</h3></header>
+        <header>
+          <h3>Mailtemplates</h3>
+          <button class="btn ghost small" data-open="template">Toevoegen</button>
+        </header>
         <div class="body">
-          <p class="tiny">Ongelezen: ${unreadMailCount()}. Totaal: ${emails.length}.</p>
+          ${mailTemplates.length ? `<div class="list">${mailTemplates.map((t) => `
+            <div class="item" style="cursor:default">
+              <b>${esc(t.name)}</b>
+              <small>${esc(t.subject || '(geen onderwerp)')}</small>
+              <div class="actions">
+                <button type="button" class="btn ghost small" data-open="template" data-record="${t.id}">Bewerken</button>
+                <button type="button" class="btn ghost small" data-delete="nh_mail_templates" data-id="${t.id}">Verwijderen</button>
+              </div>
+            </div>`).join('')}</div>` : '<p class="muted">Nog geen templates. Voeg de eerste toe; ze verschijnen daarna in de mailmodule.</p>'}
         </div>
       </section>
     </div>
@@ -1074,6 +1086,39 @@ function mailThreadView(id) {
   `, 'mail')
 }
 
+function mailTemplatePicker() {
+  const options = [`<option value="">Geen template</option>`]
+    .concat(mailTemplates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`))
+    .join('')
+  return `<div class="field full"><label>Template</label>
+    ${mailTemplates.length
+      ? `<select name="template_id">${options}</select>`
+      : '<p class="tiny">Nog geen templates. Voeg ze toe via Instellingen → Mailtemplates.</p>'}</div>`
+}
+
+function quotedMailBody(existingMail) {
+  if (!existingMail?.text_body) return ''
+  return `\n\n\n> ${String(existingMail.text_body).split('\n').join('\n> ')}`
+}
+
+function bindMailTemplateSelect(wrap, isReply) {
+  const sel = wrap.querySelector('select[name="template_id"]')
+  if (!sel) return
+  sel.addEventListener('change', () => {
+    const t = mailTemplates.find((x) => x.id === sel.value)
+    if (!t) return
+    const subjectEl = wrap.querySelector('[name="subject"]')
+    const bodyEl = wrap.querySelector('[name="text"]')
+    const quoted = wrap.querySelector('[name="quoted"]')?.value || ''
+    const filled = {
+      subject: (isReply && subjectEl.value) ? subjectEl.value : (t.subject || ''),
+      body: (t.body || '') + quoted
+    }
+    subjectEl.value = filled.subject
+    bodyEl.value = filled.body
+  })
+}
+
 function modalHtml(title, body, formName, submitLabel = 'Opslaan') {
   return `<div class="modal-back"><div class="modal">
     <h2>${esc(title)}</h2>
@@ -1158,6 +1203,7 @@ function showModal(kind, payload = {}) {
   const existingRev = kind === 'revenue' && payload.recordId ? allRevenuesList().find((r) => r.id === payload.recordId) : null
   const existingCost = kind === 'cost' && payload.recordId ? costs.find((x) => x.id === payload.recordId) : null
   const existingMail = kind === 'mail' && payload.recordId ? emails.find((m) => m.id === payload.recordId) : null
+  const existingTemplate = kind === 'template' && payload.recordId ? mailTemplates.find((t) => t.id === payload.recordId) : null
   const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || existingMail?.customer_id || ''
   const c = payload.customer || customers.find((x) => x.id === customerId)
   const needCustomer = !c && ['opp', 'contact', 'activity', 'quote'].includes(kind) && !payload.recordId
@@ -1261,6 +1307,15 @@ function showModal(kind, payload = {}) {
       </div>`, 'cost')
     wrap.querySelector('.modal').classList.add('wide')
   }
+  if (kind === 'template') {
+    wrap.innerHTML = modalHtml(existingTemplate ? 'Template bewerken' : 'Nieuw template', `
+      <input type="hidden" name="id" value="${esc(existingTemplate?.id || '')}">
+      <div class="field full"><label>Naam</label><input name="name" required value="${esc(existingTemplate?.name || '')}" placeholder="Bijv. Introductie"></div>
+      <div class="field full"><label>Onderwerp</label><input name="subject" value="${esc(existingTemplate?.subject || '')}"></div>
+      <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Hoi,">${esc(existingTemplate?.body || '')}</textarea></div>
+    `, 'template')
+    wrap.querySelector('.modal').classList.add('wide')
+  }
   if (kind === 'mail') {
     const person = primaryContact(c)
     const to = existingMail
@@ -1270,16 +1325,19 @@ function showModal(kind, payload = {}) {
       ? (/^re\s*:/i.test(existingMail.subject || '') ? existingMail.subject : `Re: ${existingMail.subject || ''}`)
       : ''
     const contactsWithMail = (c?.contacts || []).filter((p) => p.email)
+    const quoted = quotedMailBody(existingMail)
     wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
       <input type="hidden" name="reply_to_id" value="${esc(existingMail?.id || '')}">
       <input type="hidden" name="contact_id" value="${esc((existingMail?.contact_id || person?.id) || '')}">
+      <textarea name="quoted" hidden>${esc(quoted)}</textarea>
       ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId, { required: false, allowNone: true })}
+      ${mailTemplatePicker()}
       <div class="field full"><label>Aan</label>
         <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl">
         <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
       </div>
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}"></div>
-      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${existingMail && existingMail.text_body ? `\n\n\n> ${esc(String(existingMail.text_body).split('\n').join('\n> '))}` : ''}</textarea></div>
+      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
     `, 'mail', 'Versturen')
     wrap.querySelector('.modal').classList.add('wide')
   }
@@ -1299,6 +1357,7 @@ function showModal(kind, payload = {}) {
     if (quick.value) wrap.querySelector('[name="remind_at"]').value = addDays(Number(quick.value))
   })
   bindAllocUi(wrap)
+  bindMailTemplateSelect(wrap, !!existingMail)
 }
 
 function fd(form) {
@@ -1462,6 +1521,19 @@ async function onSubmit(e, modal) {
       modal?.remove()
       await refresh()
       flash(id ? 'Contactmoment aangepast' : 'Contactmoment gelogd')
+      return
+    }
+    if (kind === 'template') {
+      const id = v.id
+      delete v.id
+      await upsert('nh_mail_templates', {
+        name: (v.name || '').trim(),
+        subject: v.subject || '',
+        body: v.body || ''
+      }, id)
+      modal?.remove()
+      await refresh()
+      flash(id ? 'Template aangepast' : 'Template toegevoegd')
       return
     }
     if (kind === 'mail') {
