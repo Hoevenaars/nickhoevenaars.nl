@@ -1,6 +1,11 @@
 {
   "name": "nickhoevenaars.nl static site",
-  "ports": [8000],
+  "ports": [
+    {
+      "name": "static-server",
+      "port": 8000
+    }
+  ],
   "terminals": [
     {
       "name": "static-server",
