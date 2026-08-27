@@ -293,7 +293,23 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .queue-main { flex: 1; min-width: 0; background: none; border: 0; color: inherit; text-align: left; cursor: pointer }
 .queue-main b { display: block; font-weight: 500; font-size: .92rem }
 .queue-main small { color: var(--muted); font-size: .78rem }
-.queue.overdue h3 { color: var(--bad) }
+.phase-board {
+  display: grid; gap: .55rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.phase-col {
+  border: 1px solid var(--line); border-radius: 10px; padding: .5rem;
+  min-height: 88px; background: rgba(255,255,255,.02);
+}
+.phase-col h3 {
+  font-size: .78rem; font-weight: 500; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+  margin: 0 0 .45rem; display: flex; justify-content: space-between; gap: .4rem;
+}
+.phase-col .item { margin-bottom: .4rem }
+.phase-col .item:last-child { margin-bottom: 0 }
+.item .queue-main { width: 100%; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; padding: 0 }
+.item .row-actions { margin-top: .4rem }
 
 @media (max-width: 860px) {
   .shell { flex-direction: column }

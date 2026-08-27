@@ -165,6 +165,15 @@ function chipForPhase(phase) {
   if (phase === 'voorstel' || phase === 'follow-up') return 'yellow'
   return 'blue'
 }
+function chipForQuote(st) {
+  if (st === 'geaccepteerd') return 'green'
+  if (st === 'afgewezen') return 'red'
+  if (st === 'verstuurd') return 'yellow'
+  return 'blue'
+}
+function quoteStatusLabel(id) {
+  return QUOTE_STATUSES.find((s) => s.id === id)?.label || id || '—'
+}
 function chipForStatus(st) {
   if (st === 'actief') return 'green'
   if (st === 'verloren') return 'red'
@@ -440,6 +449,89 @@ function queueHtml(items) {
   }).join('')
 }
 
+function dashboardPhaseBoard() {
+  const cols = PHASES.filter((p) => p.id !== 'verloren')
+  const byPhase = Object.fromEntries(cols.map((p) => [p.id, []]))
+  const none = []
+  for (const c of customers) {
+    const opps = (c.opps || []).filter((o) => o.phase !== 'verloren' && o.phase !== 'onhold')
+    if (!opps.length) {
+      if (c.status !== 'verloren') none.push(c)
+      continue
+    }
+    for (const o of opps) {
+      if (byPhase[o.phase]) byPhase[o.phase].push({ c, o })
+    }
+  }
+  const colHtml = (title, rows, empty) => `
+    <div class="phase-col">
+      <h3>${esc(title)} <span class="tiny">${rows.length}</span></h3>
+      ${rows.length ? rows.join('') : `<p class="tiny">${esc(empty)}</p>`}
+    </div>`
+  const oppCard = ({ c, o }) => `
+    <button type="button" class="item" data-go="#/klanten/${c.id}?tab=werk">
+      <b>${esc(c.company_name)}</b>
+      <small>${esc(o.title)}${o.potential_value ? ' · ' + money(o.potential_value) : ''}</small>
+    </button>`
+  const noneCard = (c) => `
+    <button type="button" class="item" data-go="#/klanten/${c.id}">
+      <b>${esc(c.company_name)}</b>
+      <small>${esc(statusLabel(c.status))}</small>
+    </button>`
+  return `<section class="section">
+    <header><h3>Funnel</h3></header>
+    <div class="body">
+      <div class="phase-board">
+        ${cols.map((p) => colHtml(p.label, (byPhase[p.id] || []).map(oppCard), '—')).join('')}
+        ${colHtml('Geen open kans', none.map(noneCard), 'Iedereen zit in de funnel.')}
+      </div>
+    </div>
+  </section>`
+}
+
+function quotesToBill() {
+  const booked = bookedQuoteIds()
+  return customers.flatMap((c) => (c.quotes || []).map((q) => ({ ...q, company: c.company_name, cid: c.id })))
+    .filter((q) => {
+      if (q.status === 'afgewezen') return false
+      if (q.status === 'geaccepteerd' && booked.has(q.id)) return false
+      return q.status === 'concept' || q.status === 'verstuurd' || q.status === 'geaccepteerd'
+    })
+    .sort((a, b) => {
+      const order = { geaccepteerd: 0, verstuurd: 1, concept: 2 }
+      return (order[a.status] - order[b.status]) || String(b.issued_at || '').localeCompare(String(a.issued_at || ''))
+    })
+}
+
+function dashboardInvoices() {
+  const booked = bookedQuoteIds()
+  const rows = quotesToBill()
+  const billLabel = (q) => {
+    if (q.status === 'geaccepteerd' && !booked.has(q.id)) return 'Nog te factureren'
+    if (q.status === 'verstuurd') return 'Openstaand'
+    return quoteStatusLabel(q.status)
+  }
+  return `<section class="section">
+    <header>
+      <h3>Te factureren</h3>
+      <span class="tiny">${rows.length ? money(rows.reduce((s, q) => s + Number(q.amount || 0), 0)) : ''}</span>
+    </header>
+    <div class="body">
+      ${rows.length ? `<div class="list">${rows.map((q) => `
+        <div class="item" style="cursor:default">
+          <button type="button" class="queue-main" data-go="#/klanten/${q.cid}?tab=geld">
+            <b>${esc(q.title)} <span class="chip ${chipForQuote(q.status)}">${esc(billLabel(q))}</span></b>
+            <small>${esc(q.company)} · ${money(q.amount)} · ${fmtDate(q.issued_at)}</small>
+          </button>
+          ${q.status === 'geaccepteerd' && !booked.has(q.id)
+            ? `<div class="row-actions" data-stop="1"><button type="button" class="btn small" data-book-quote="${q.id}">Boek als opbrengst</button></div>`
+            : ''}
+        </div>`).join('')}</div>`
+      : '<p class="muted">Niets openstaand. Geen concept-, verstuurde of geaccepteerde offertes die nog geboekt moeten worden.</p>'}
+    </div>
+  </section>`
+}
+
 function dashboardView() {
   const today = isoDate()
   const monthRevOnce = allRevenuesList().reduce((s, r) => s + (r.kind === 'maandelijks' || !inPeriod(r.received_at, 'maand') ? 0 : Number(r.amount || 0)), 0)
@@ -453,9 +545,13 @@ function dashboardView() {
     <div class="page-head">
       <div>
         <h1>Dashboard</h1>
-        <p class="lead">Eén lijst. Wat te laat is, wat vandaag moet, wat deze week stilstaat.</p>
+        <p class="lead">Waar iedere opdrachtgever staat, en wat er nog gefactureerd moet worden.</p>
       </div>
       ${plusBar()}
+    </div>
+    <div class="stack">
+      ${dashboardPhaseBoard()}
+      ${dashboardInvoices()}
     </div>
     ${queueHtml(workItems())}
     <button type="button" class="strip" data-go="#/geld">
@@ -488,12 +584,12 @@ function customersView(params) {
     <div class="page-head">
       <div>
         <h1>Opdrachtgevers</h1>
-        <p class="lead">${rows.length} ${rows.length === 1 ? 'klant' : 'klanten'}</p>
+        <p class="lead">${rows.length} ${rows.length === 1 ? 'opdrachtgever' : 'opdrachtgevers'}</p>
       </div>
       ${plusBar()}
     </div>
     <div class="topbar">
-      <input class="search" data-search="klanten" value="${esc(params.q || '')}" placeholder="Zoek klant of contact">
+      <input class="search" data-search="klanten" value="${esc(params.q || '')}" placeholder="Zoek opdrachtgever of contact">
     </div>
     <div class="filters">
       ${filters.map(([id, label]) => `<button class="filter ${f === id ? 'active' : ''}" data-go="#/klanten?f=${id}${q ? '&q=' + encodeURIComponent(params.q) : ''}">${label}</button>`).join('')}
