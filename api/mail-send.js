@@ -1,7 +1,7 @@
 import { json, bearerToken } from '../lib/http.js'
 import { userClient } from '../lib/supabase.js'
 import { sendResendEmail, fromAddress } from '../lib/resend.js'
-import { parseAddress, replySubject, textToHtml, rootThreadId } from '../lib/mail.js'
+import { parseAddress, replySubject, textToHtml, rootThreadId, leftoverMailPlaceholders, leftoverFieldsError } from '../lib/mail.js'
 
 async function requireAdmin(req) {
   const token = bearerToken(req)
@@ -39,6 +39,11 @@ export default async function handler(req, res) {
     }
     if (!String(subject || '').trim() || !String(text || '').trim()) {
       return json(res, 400, { ok: false, error: 'Onderwerp en bericht zijn verplicht.' })
+    }
+    const leftover = leftoverMailPlaceholders(`${subject}\n${text}`)
+    const leftoverErr = leftoverFieldsError(leftover)
+    if (leftoverErr) {
+      return json(res, 400, { ok: false, error: leftoverErr })
     }
 
     let parent = null

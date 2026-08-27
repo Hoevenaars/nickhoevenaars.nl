@@ -2,9 +2,11 @@ import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, sendMailApi, replaceAllocations,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadSettings, saveSetting, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
-  daysSince, isoDate, addDays
+  daysSince, isoDate, addDays,
+  MAIL_INSERT_FIELDS, mailFieldLabel, findMailPlaceholders, leftoverMailPlaceholders, leftoverFieldsError,
+  mailAutofillValues, appendMailFooter, fillFromMailTemplate
 } from './api.js'
 
 const app = document.getElementById('app')
@@ -15,6 +17,7 @@ let looseRevenues = []
 let looseTodos = []
 let emails = []
 let mailTemplates = []
+let mailSettings = {}
 let notice = ''
 
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -178,7 +181,7 @@ function prioChip(p) {
 }
 
 function primaryContact(c) {
-  return c.contacts.find((x) => x.is_primary) || c.contacts[0] || null
+  return c?.contacts?.find((x) => x.is_primary) || c?.contacts?.[0] || null
 }
 
 function stale(c) {
@@ -238,8 +241,8 @@ function companyForMail(m) {
 }
 
 async function refresh() {
-  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates] = await Promise.all([
-    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates()
+  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates, mailSettings] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates(), loadSettings()
   ])
   attachEmails()
 }
@@ -598,11 +601,12 @@ function todosView() {
 }
 
 function settingsView() {
+  const footer = mailSettings.mail_footer || ''
   return shell(`
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Account en mailtemplates. Later komt hier meer.</p>
+        <p class="lead">Account, voettekst en mailtemplates. Later komt hier meer.</p>
       </div>
     </div>
     <div class="stack">
@@ -617,20 +621,39 @@ function settingsView() {
         </div>
       </section>
       <section class="section">
+        <header><h3>Voettekst</h3></header>
+        <div class="body">
+          <form class="form" data-form="mail-footer">
+            <div class="field full">
+              <label>Onder elke nieuwe mail</label>
+              <textarea name="footer" rows="5" placeholder="Groet,&#10;Nick Hoevenaars">${esc(footer)}</textarea>
+            </div>
+            <p class="tiny">Los van templates. Je ziet hem in het opstelvenster en kunt hem per mail nog aanpassen.</p>
+            <div class="actions">
+              <button class="btn" type="submit">Opslaan</button>
+            </div>
+          </form>
+        </div>
+      </section>
+      <section class="section">
         <header>
           <h3>Mailtemplates</h3>
           <button class="btn ghost small" data-open="template">Toevoegen</button>
         </header>
         <div class="body">
-          ${mailTemplates.length ? `<div class="list">${mailTemplates.map((t) => `
+          <p class="tiny" style="margin-bottom:.7rem">Zet velden als <code>[naam]</code> en <code>[bedrijfsnaam]</code> in de tekst. Die vult de admin uit de klant; wat ontbreekt moet je zelf invullen voordat je kunt versturen.</p>
+          ${mailTemplates.length ? `<div class="list">${mailTemplates.map((t) => {
+            const keys = findMailPlaceholders(`${t.subject || ''}\n${t.body || ''}`)
+            return `
             <div class="item" style="cursor:default">
               <b>${esc(t.name)}</b>
-              <small>${esc(t.subject || '(geen onderwerp)')}</small>
+              <small>${esc(t.subject || '(geen onderwerp)')}${keys.length ? ' · ' + keys.map((k) => `[${k}]`).join(' ') : ''}</small>
               <div class="actions">
                 <button type="button" class="btn ghost small" data-open="template" data-record="${t.id}">Bewerken</button>
                 <button type="button" class="btn ghost small" data-delete="nh_mail_templates" data-id="${t.id}">Verwijderen</button>
               </div>
-            </div>`).join('')}</div>` : '<p class="muted">Nog geen templates. Voeg de eerste toe; ze verschijnen daarna in de mailmodule.</p>'}
+            </div>`
+          }).join('')}</div>` : '<p class="muted">Nog geen templates. Voeg de eerste toe; ze verschijnen daarna in de mailmodule.</p>'}
         </div>
       </section>
     </div>
@@ -1086,6 +1109,10 @@ function mailThreadView(id) {
   `, 'mail')
 }
 
+function mailFooter() {
+  return String(mailSettings.mail_footer || '')
+}
+
 function mailTemplatePicker() {
   const options = [`<option value="">Geen template</option>`]
     .concat(mailTemplates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`))
@@ -1101,21 +1128,116 @@ function quotedMailBody(existingMail) {
   return `\n\n\n> ${String(existingMail.text_body).split('\n').join('\n> ')}`
 }
 
-function bindMailTemplateSelect(wrap, isReply) {
+function customerFromMailForm(wrap) {
+  const id = wrap.querySelector('[name="customer_id"]')?.value
+  return customers.find((x) => x.id === id) || null
+}
+
+function mailFieldOverrides(wrap) {
+  const o = {}
+  wrap.querySelectorAll('[data-mail-field]').forEach((el) => {
+    o[el.getAttribute('data-mail-field')] = el.value
+  })
+  return o
+}
+
+function mailComposeValues(wrap) {
+  const c = customerFromMailForm(wrap)
+  return { ...mailAutofillValues({ customer: c, contact: primaryContact(c) }), ...mailFieldOverrides(wrap) }
+}
+
+function paintMailFields(wrap, keys, values) {
+  const box = wrap.querySelector('[data-mail-fields]')
+  const list = wrap.querySelector('[data-mail-fields-list]')
+  if (!box || !list) return
+  if (!keys.length) {
+    box.hidden = true
+    list.innerHTML = ''
+    return
+  }
+  box.hidden = false
+  list.innerHTML = keys.map((key) => {
+    const val = values[key] || ''
+    return `<div class="field ${String(val).trim() ? '' : 'need'}">
+      <label>${esc(mailFieldLabel(key))} <code>[${esc(key)}]</code></label>
+      <input data-mail-field="${esc(key)}" value="${esc(val)}" required placeholder="Verplicht">
+    </div>`
+  }).join('')
+  list.querySelectorAll('[data-mail-field]').forEach((el) => {
+    el.addEventListener('input', () => applyMailCompose(wrap, { keepFields: true }))
+  })
+}
+
+function applyMailCompose(wrap, { keepFields = false, seedFooter = false } = {}) {
+  const isReply = !!wrap.querySelector('[name="reply_to_id"]')?.value
   const sel = wrap.querySelector('select[name="template_id"]')
-  if (!sel) return
-  sel.addEventListener('change', () => {
-    const t = mailTemplates.find((x) => x.id === sel.value)
-    if (!t) return
-    const subjectEl = wrap.querySelector('[name="subject"]')
-    const bodyEl = wrap.querySelector('[name="text"]')
-    const quoted = wrap.querySelector('[name="quoted"]')?.value || ''
-    const filled = {
-      subject: (isReply && subjectEl.value) ? subjectEl.value : (t.subject || ''),
-      body: (t.body || '') + quoted
-    }
+  const t = mailTemplates.find((x) => x.id === sel?.value) || null
+  const quoted = wrap.querySelector('[name="quoted"]')?.value || ''
+  const values = mailComposeValues(wrap)
+  const subjectEl = wrap.querySelector('[name="subject"]')
+  const bodyEl = wrap.querySelector('[name="text"]')
+  if (!subjectEl || !bodyEl) return
+  if (t) {
+    const filled = fillFromMailTemplate(t, {
+      isReply,
+      currentSubject: subjectEl.value,
+      quoted,
+      values,
+      footer: mailFooter()
+    })
     subjectEl.value = filled.subject
     bodyEl.value = filled.body
+    const keys = findMailPlaceholders(`${t.subject || ''}\n${t.body || ''}`)
+    if (keepFields) {
+      wrap.querySelectorAll('[data-mail-field]').forEach((el) => {
+        el.closest('.field')?.classList.toggle('need', !String(el.value).trim())
+      })
+    } else {
+      paintMailFields(wrap, keys, values)
+    }
+    return
+  }
+  if (!keepFields) paintMailFields(wrap, [], {})
+  if (seedFooter) bodyEl.value = appendMailFooter('', mailFooter()) + quoted
+}
+
+function bindMailCompose(wrap) {
+  if (!wrap.querySelector('form[data-form="mail"]')) return
+  applyMailCompose(wrap, { seedFooter: true })
+  wrap.querySelector('select[name="template_id"]')?.addEventListener('change', () => {
+    applyMailCompose(wrap, { keepFields: false })
+  })
+  wrap.querySelector('select[name="customer_id"]')?.addEventListener('change', () => {
+    const c = customerFromMailForm(wrap)
+    const person = primaryContact(c)
+    const contactId = wrap.querySelector('[name="contact_id"]')
+    if (contactId) contactId.value = person?.id || ''
+    const to = wrap.querySelector('[name="to"]')
+    if (to && !to.value && person?.email) to.value = person.email
+    applyMailCompose(wrap, { keepFields: false })
+  })
+}
+
+function insertAtCursor(el, text) {
+  if (!el) return
+  const start = el.selectionStart ?? el.value.length
+  const end = el.selectionEnd ?? el.value.length
+  el.value = el.value.slice(0, start) + text + el.value.slice(end)
+  const pos = start + text.length
+  el.focus()
+  try { el.setSelectionRange(pos, pos) } catch { /* not all inputs */ }
+}
+
+function bindTemplateTokens(wrap) {
+  if (!wrap.querySelector('form[data-form="template"]')) return
+  wrap.querySelectorAll('[data-insert-token]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const token = `[${btn.getAttribute('data-insert-token')}]`
+      const subject = wrap.querySelector('[name="subject"]')
+      const body = wrap.querySelector('[name="body"]')
+      const target = document.activeElement === subject ? subject : body
+      insertAtCursor(target, token)
+    })
   })
 }
 
@@ -1312,7 +1434,12 @@ function showModal(kind, payload = {}) {
       <input type="hidden" name="id" value="${esc(existingTemplate?.id || '')}">
       <div class="field full"><label>Naam</label><input name="name" required value="${esc(existingTemplate?.name || '')}" placeholder="Bijv. Introductie"></div>
       <div class="field full"><label>Onderwerp</label><input name="subject" value="${esc(existingTemplate?.subject || '')}"></div>
-      <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Hoi,">${esc(existingTemplate?.body || '')}</textarea></div>
+      <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Hoi [naam],">${esc(existingTemplate?.body || '')}</textarea></div>
+      <div class="field full">
+        <label>Invulvelden</label>
+        <div class="token-row">${MAIL_INSERT_FIELDS.map((f) => `<button type="button" class="btn ghost small" data-insert-token="${esc(f.key)}">[${esc(f.key)}]</button>`).join('')}</div>
+        <p class="tiny">[naam] = voornaam van de contactpersoon, [bedrijfsnaam] = klant. Wat de admin niet weet, vul je bij versturen in. Zonder ingevulde velden gaat de mail niet de deur uit.</p>
+      </div>
     `, 'template')
     wrap.querySelector('.modal').classList.add('wide')
   }
@@ -1332,12 +1459,17 @@ function showModal(kind, payload = {}) {
       <textarea name="quoted" hidden>${esc(quoted)}</textarea>
       ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId, { required: false, allowNone: true })}
       ${mailTemplatePicker()}
+      <div class="field full" data-mail-fields hidden>
+        <label>Invulvelden</label>
+        <div class="mail-fields" data-mail-fields-list></div>
+        <p class="tiny">Uit de klant als het kan; anders zelf invullen. Versturen kan niet zolang er nog [velden] in de mail staan.</p>
+      </div>
       <div class="field full"><label>Aan</label>
         <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl">
         <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
       </div>
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}"></div>
-      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
+      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(appendMailFooter('', mailFooter()) + quoted)}</textarea></div>
     `, 'mail', 'Versturen')
     wrap.querySelector('.modal').classList.add('wide')
   }
@@ -1357,7 +1489,8 @@ function showModal(kind, payload = {}) {
     if (quick.value) wrap.querySelector('[name="remind_at"]').value = addDays(Number(quick.value))
   })
   bindAllocUi(wrap)
-  bindMailTemplateSelect(wrap, !!existingMail)
+  bindMailCompose(wrap)
+  bindTemplateTokens(wrap)
 }
 
 function fd(form) {
@@ -1523,6 +1656,12 @@ async function onSubmit(e, modal) {
       flash(id ? 'Contactmoment aangepast' : 'Contactmoment gelogd')
       return
     }
+    if (kind === 'mail-footer') {
+      await saveSetting('mail_footer', v.footer || '')
+      await refresh()
+      flash('Voettekst opgeslagen')
+      return
+    }
     if (kind === 'template') {
       const id = v.id
       delete v.id
@@ -1537,6 +1676,9 @@ async function onSubmit(e, modal) {
       return
     }
     if (kind === 'mail') {
+      const leftover = leftoverMailPlaceholders(`${v.subject || ''}\n${v.text || ''}`)
+      const leftoverErr = leftoverFieldsError(leftover)
+      if (leftoverErr) throw new Error(leftoverErr)
       const sent = await sendMailApi({
         to: v.to,
         subject: v.subject,

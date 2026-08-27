@@ -197,7 +197,11 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   padding: .55rem .7rem; outline: none
 }
 .field textarea { min-height: 88px; resize: vertical }
+.field.need input { border-color: rgba(251,191,36,.65) }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: rgba(59,130,246,.5) }
+.token-row, .mail-fields { display: flex; flex-wrap: wrap; gap: .4rem }
+.mail-fields { display: grid; grid-template-columns: 1fr 1fr; }
+.mail-fields .field { min-width: 0 }
 .check { display: flex; align-items: center; gap: .45rem; font-size: .88rem; color: var(--muted) }
 
 .timeline { display: flex; flex-direction: column; gap: 0 }
@@ -302,6 +306,6 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   .brand small { display: none }
   .sidebar .spacer, .userbox { display: none }
   .nav-btn { width: auto; padding: .45rem .7rem }
-  .form.two, .kv, .tl, .log-bar, .log-more { grid-template-columns: 1fr }
+  .form.two, .kv, .tl, .log-bar, .log-more, .mail-fields { grid-template-columns: 1fr }
   .main { padding: 1rem 1rem 2.5rem }
 }

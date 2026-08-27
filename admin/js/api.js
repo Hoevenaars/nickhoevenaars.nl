@@ -1,5 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
+export {
+  MAIL_INSERT_FIELDS,
+  mailFieldLabel,
+  findMailPlaceholders,
+  leftoverMailPlaceholders,
+  leftoverFieldsError,
+  applyMailPlaceholders,
+  mailAutofillValues,
+  appendMailFooter,
+  fillFromMailTemplate
+} from '../../lib/mail.js'
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
@@ -207,6 +218,25 @@ export async function loadMailTemplates() {
     return []
   }
   return data || []
+}
+
+export async function loadSettings() {
+  const { data, error } = await sb.from('nh_settings').select('key, value')
+  if (error) {
+    console.warn('nh_settings:', error.message)
+    return {}
+  }
+  return Object.fromEntries((data || []).map((row) => [row.key, row.value]))
+}
+
+export async function saveSetting(key, value) {
+  const { data, error } = await sb
+    .from('nh_settings')
+    .upsert({ key, value: value ?? '' }, { onConflict: 'key' })
+    .select()
+    .single()
+  if (error) throw error
+  return data
 }
 
 export async function loadEmails() {
