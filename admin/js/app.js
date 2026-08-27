@@ -624,7 +624,7 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Account en mailtemplates. Later komt hier meer.</p>
+        <p class="lead">Account, voettekst en mailtemplates.</p>
       </div>
     </div>
     <div class="stack">
@@ -636,6 +636,13 @@ function settingsView() {
           <dt>Data</dt><dd>Fluweel Supabase, tabellen <code>nh_*</code>.</dd>
           <dt>Versturen</dt><dd>Resend, vanaf <code>contact@nickhoevenaars.nl</code> (Vercel-env <code>EMAIL_FROM</code>).</dd>
           <dt>Ontvangen</dt><dd>Webhook <code>/api/mail-inbound</code>. Zet in TransIP doorsturen aan naar je Resend inbound-adres, MX niet omgooien.</dd>
+        </div>
+      </section>
+      <section class="section">
+        <header><h3>Voettekst</h3></header>
+        <div class="body">
+          <p class="tiny">Onder elke mail, automatisch. Niet in het tekstvak typen.</p>
+          <div class="mail-footer">${esc(MAIL_FOOTER)}</div>
         </div>
       </section>
       <section class="section">
@@ -1136,7 +1143,7 @@ function bindMailTemplateSelect(wrap, isReply) {
     const quoted = wrap.querySelector('[name="quoted"]')?.value || ''
     const filled = {
       subject: (isReply && subjectEl.value) ? subjectEl.value : (t.subject || ''),
-      body: withMailFooter(t.body || '') + quoted
+      body: (t.body || '') + quoted
     }
     subjectEl.value = filled.subject
     bodyEl.value = filled.body
@@ -1363,7 +1370,11 @@ function showModal(kind, payload = {}) {
         <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
       </div>
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}" autocomplete="off"></div>
-      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(withMailFooter('') + quoted)}</textarea></div>
+      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
+      <div class="field full">
+        <label>Voettekst (automatisch)</label>
+        <div class="mail-footer">${esc(MAIL_FOOTER)}</div>
+      </div>
     `, 'mail', 'Versturen')
     wrap.querySelector('.modal')?.classList.add('wide')
   }
@@ -1599,7 +1610,7 @@ async function onSubmit(e, modal) {
         sent = await sendMailApi({
           to: v.to,
           subject: v.subject,
-          text: v.text,
+          text: withMailFooter(v.text),
           customer_id: v.customer_id,
           contact_id: v.contact_id,
           reply_to_id: v.reply_to_id

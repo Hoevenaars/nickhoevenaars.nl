@@ -203,6 +203,16 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 }
 .field textarea { min-height: 88px; resize: vertical }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: rgba(59,130,246,.5) }
+.mail-footer {
+  white-space: pre-wrap;
+  background: var(--paper-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  padding: .65rem .75rem;
+  color: var(--muted);
+  font-size: .92rem;
+  line-height: 1.45;
+}
 .check { display: flex; align-items: center; gap: .45rem; font-size: .88rem; color: var(--muted) }
 
 .timeline { display: flex; flex-direction: column; gap: 0 }
