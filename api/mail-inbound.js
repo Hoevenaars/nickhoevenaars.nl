@@ -1,37 +1,37 @@
-import { json, headerValue, readRawBody } from '../lib/http.js'
 import { serviceClient } from '../lib/supabase.js'
 import { getReceivedEmail } from '../lib/resend.js'
 import { verifySvixSignature } from '../lib/webhook.js'
 import { headerLookup, inboundRow, matchParty, resolveThreadId } from '../lib/mail.js'
 
-export const config = {
-  api: { bodyParser: false }
+export const config = { runtime: 'edge' }
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' }
+  })
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return json(res, 405, { ok: false, error: 'Methode niet toegestaan.' })
+export default async function handler(request) {
+  if (request.method !== 'POST') {
+    return json({ ok: false, error: 'Methode niet toegestaan.' }, 405)
   }
   try {
-    const raw = await readRawBody(req)
-    verifySvixSignature(raw, {
-      'svix-id': headerValue(req, 'svix-id'),
-      'svix-timestamp': headerValue(req, 'svix-timestamp'),
-      'svix-signature': headerValue(req, 'svix-signature')
-    }, process.env.RESEND_WEBHOOK_SECRET)
+    const raw = await request.text()
+    await verifySvixSignature(raw, request.headers, process.env.RESEND_WEBHOOK_SECRET)
 
     const event = JSON.parse(raw || '{}')
     if (event.type && event.type !== 'email.received') {
-      return json(res, 200, { ok: true, ignored: event.type })
+      return json({ ok: true, ignored: event.type })
     }
 
     const parsed = event.data || {}
     const emailId = parsed.email_id
-    if (!emailId) return json(res, 200, { ok: true, ignored: 'no_email_id' })
+    if (!emailId) return json({ ok: true, ignored: 'no_email_id' })
 
     const sb = serviceClient()
     const { data: existing } = await sb.from('nh_emails').select('id').eq('resend_id', emailId).maybeSingle()
-    if (existing) return json(res, 200, { ok: true, duplicate: true })
+    if (existing) return json({ ok: true, duplicate: true })
 
     let content = {}
     try {
@@ -49,6 +49,7 @@ export default async function handler(req, res) {
         headers: {}
       }
     }
+
     const inReplyTo = headerLookup(content?.headers, 'in-reply-to')
     const messageId = content?.message_id || parsed.message_id || headerLookup(content?.headers, 'message-id')
 
@@ -75,7 +76,7 @@ export default async function handler(req, res) {
     const { data: saved, error } = await sb.from('nh_emails').insert(row).select().single()
     if (error) {
       if (String(error.message || '').includes('duplicate') || error.code === '23505') {
-        return json(res, 200, { ok: true, duplicate: true })
+        return json({ ok: true, duplicate: true })
       }
       throw error
     }
@@ -90,9 +91,9 @@ export default async function handler(req, res) {
       })
     }
 
-    return json(res, 200, { ok: true, id: saved.id })
+    return json({ ok: true, id: saved.id })
   } catch (err) {
     console.error(err)
-    return json(res, err.status || 500, { ok: false, error: err.message || 'Webhook mislukt.' })
+    return json({ ok: false, error: err.message || 'Webhook mislukt.' }, err.status || 500)
   }
 }
