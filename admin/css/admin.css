@@ -221,7 +221,7 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .err { color: var(--bad); font-size: .88rem }
 
 .modal-back {
-  position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20;
+  position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 40;
   display: grid; place-items: center; padding: 1rem
 }
 .modal {
@@ -230,7 +230,7 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 }
 .modal h2 { margin-bottom: .8rem; font-size: 1.15rem }
 .actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .4rem; flex-wrap: wrap }
-.plus { position: relative }
+.plus { position: relative; z-index: 9 }
 .plus-btn {
   width: 42px; height: 42px; border-radius: 50%;
   background: linear-gradient(135deg, var(--accent-2), var(--accent));
@@ -240,7 +240,7 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .plus-menu {
   display: none; position: absolute; right: 0; top: calc(100% + .4rem);
   min-width: 220px; background: #16161b; border: 1px solid var(--line-strong);
-  border-radius: 14px; padding: .4rem; z-index: 8;
+  border-radius: 14px; padding: .4rem; z-index: 30;
   box-shadow: 0 12px 40px rgba(0,0,0,.4)
 }
 .plus.open .plus-menu { display: grid }

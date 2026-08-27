@@ -10,7 +10,7 @@ export {
   mailAutofillValues,
   appendMailFooter,
   fillFromMailTemplate
-} from '../../lib/mail.js'
+} from './mail-fields.js'
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
