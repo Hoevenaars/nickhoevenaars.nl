@@ -611,7 +611,7 @@ function settingsView() {
           <dt>E-mail</dt><dd>${esc(session.user.email)}</dd>
           <dt>Rol</dt><dd>Admin</dd>
           <dt>Data</dt><dd>Fluweel Supabase, tabellen <code>nh_*</code>.</dd>
-          <dt>Versturen</dt><dd>Resend, vanaf <code>nick@nickhoevenaars.nl</code> (Vercel-env <code>EMAIL_FROM</code>).</dd>
+          <dt>Versturen</dt><dd>Resend, vanaf <code>contact@nickhoevenaars.nl</code> (Vercel-env <code>EMAIL_FROM</code>).</dd>
           <dt>Ontvangen</dt><dd>Webhook <code>/api/mail-inbound</code>. Zet in TransIP doorsturen aan naar je Resend inbound-adres, MX niet omgooien.</dd>
         </div>
       </section>
