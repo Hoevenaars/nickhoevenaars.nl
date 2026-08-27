@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       customer_id: customer_id || parent?.customer_id || null,
       contact_id: contact_id || parent?.contact_id || null,
       direction: 'out',
-      from_email: from.email || 'nick@nickhoevenaars.nl',
+      from_email: from.email || 'contact@nickhoevenaars.nl',
       from_name: from.name || 'Nick Hoevenaars',
       to_emails: [dest],
       cc_emails: [],

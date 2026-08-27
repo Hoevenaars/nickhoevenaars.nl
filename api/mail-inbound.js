@@ -33,7 +33,22 @@ export default async function handler(req, res) {
     const { data: existing } = await sb.from('nh_emails').select('id').eq('resend_id', emailId).maybeSingle()
     if (existing) return json(res, 200, { ok: true, duplicate: true })
 
-    const content = await getReceivedEmail(emailId)
+    let content = {}
+    try {
+      content = await getReceivedEmail(emailId)
+    } catch (err) {
+      console.error('Resend receiving get failed:', err)
+      content = {
+        from: parsed.from,
+        to: parsed.to,
+        subject: parsed.subject,
+        text: null,
+        html: null,
+        message_id: parsed.message_id,
+        created_at: parsed.created_at,
+        headers: {}
+      }
+    }
     const inReplyTo = headerLookup(content?.headers, 'in-reply-to')
     const messageId = content?.message_id || parsed.message_id || headerLookup(content?.headers, 'message-id')
 
