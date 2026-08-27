@@ -331,12 +331,12 @@ function shell(content, active) {
   return `
     <aside class="sidebar">
       <div class="brand">NH<span>.</span><small>Admin</small></div>
-      <button class="nav-btn ${active === 'dashboard' ? 'active' : ''}" data-go="#/dashboard">Nu</button>
-      <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Klanten</button>
-      <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Sales</button>
+      <button class="nav-btn ${active === 'dashboard' ? 'active' : ''}" data-go="#/dashboard">Dashboard</button>
+      <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Opdrachtgevers</button>
+      <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Funnel</button>
       <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">Taken</button>
       <button class="nav-btn ${active === 'mail' ? 'active' : ''}" data-go="#/mail">Mail${unreadMailCount() ? ` <span class="chip blue">${unreadMailCount()}</span>` : ''}</button>
-      <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Geld</button>
+      <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Finance</button>
       <button class="nav-btn ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
       <div class="spacer"></div>
       <div class="userbox">
@@ -452,7 +452,7 @@ function dashboardView() {
   return shell(`
     <div class="page-head">
       <div>
-        <h1>Nu doen</h1>
+        <h1>Dashboard</h1>
         <p class="lead">Eén lijst. Wat te laat is, wat vandaag moet, wat deze week stilstaat.</p>
       </div>
       ${plusBar()}
@@ -460,7 +460,7 @@ function dashboardView() {
     ${queueHtml(workItems())}
     <button type="button" class="strip" data-go="#/geld">
       <span>Deze maand <b class="${resultOnce >= 0 ? 'good' : 'bad'}">${money(resultOnce)}</b></span>
-      <span class="muted">Vaste last ${money(resultMonth)} /mnd · Geld →</span>
+      <span class="muted">Vaste last ${money(resultMonth)} /mnd · Finance →</span>
     </button>
   `, 'dashboard')
 }
@@ -487,7 +487,7 @@ function customersView(params) {
   return shell(`
     <div class="page-head">
       <div>
-        <h1>Klanten</h1>
+        <h1>Opdrachtgevers</h1>
         <p class="lead">${rows.length} ${rows.length === 1 ? 'klant' : 'klanten'}</p>
       </div>
       ${plusBar()}
@@ -524,7 +524,7 @@ function salesView() {
   return shell(`
     <div class="page-head">
       <div>
-        <h1>Sales</h1>
+        <h1>Funnel</h1>
         <p class="lead">Fase opschuiven. De rest staat bij de klant.</p>
       </div>
       ${plusBar()}
@@ -671,7 +671,7 @@ function moneyView() {
   return shell(`
     <div class="page-head">
       <div>
-        <h1>Geld</h1>
+        <h1>Finance</h1>
         <p class="lead">Eenmalig over ${periodLabel.toLowerCase()}. Maandlast is wat nu loopt.</p>
       </div>
       ${plusBar()}
@@ -940,7 +940,7 @@ function customerView(c) {
   return shell(`
     <div class="page-head">
       <div>
-        <p class="tiny"><a href="#/klanten">← Klanten</a></p>
+        <p class="tiny"><a href="#/klanten">← Opdrachtgevers</a></p>
         <h1>${esc(c.company_name)}</h1>
         <p class="lead cust-meta">
           <span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span>
