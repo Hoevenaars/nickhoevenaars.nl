@@ -197,6 +197,36 @@ export async function loadLooseTodos() {
   return data || []
 }
 
+export async function loadEmails() {
+  const { data, error } = await sb
+    .from('nh_emails')
+    .select('*')
+    .order('sent_at', { ascending: false })
+    .limit(400)
+  if (error) {
+    console.warn('nh_emails:', error.message)
+    return []
+  }
+  return data || []
+}
+
+export async function sendMailApi(payload) {
+  const { data: { session } } = await sb.auth.getSession()
+  if (!session?.access_token) throw new Error('Niet ingelogd.')
+  const res = await fetch('/api/mail-send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + session.access_token
+    },
+    body: JSON.stringify(payload)
+  })
+  const json = await res.json().catch(() => ({}))
+  if (res.status === 404) throw new Error('Mail versturen werkt zodra nickhoevenaars.nl op Vercel staat.')
+  if (!res.ok || !json.ok) throw new Error(json.error || 'Versturen mislukt.')
+  return json.email
+}
+
 export async function replaceAllocations(costId, rows) {
   const { error: delErr } = await sb.from('nh_cost_allocations').delete().eq('cost_id', costId)
   if (delErr) throw delErr
