@@ -130,6 +130,7 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   padding: .55rem 1rem; cursor: pointer; font-family: 'Space Grotesk', sans-serif; font-weight: 500;
 }
 .btn:hover { filter: brightness(1.06) }
+.btn:disabled { opacity: .55; cursor: wait; pointer-events: none; filter: none }
 .btn.ghost { background: transparent; border: 1px solid var(--line-strong); color: var(--ink) }
 .btn.small { padding: .32rem .6rem; font-size: .8rem }
 .btn.danger { background: transparent; border: 1px solid rgba(248,113,113,.4); color: var(--bad) }

@@ -1332,6 +1332,7 @@ function showModal(kind, payload = {}) {
     wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
       <input type="hidden" name="reply_to_id" value="${esc(existingMail?.id || '')}">
       <input type="hidden" name="contact_id" value="${esc((existingMail?.contact_id || person?.id) || '')}">
+      <input type="hidden" name="send_token" value="${esc(crypto.randomUUID())}">
       <textarea name="quoted" hidden>${esc(quoted)}</textarea>
       ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId, { required: false, allowNone: true })}
       ${mailTemplatePicker()}
@@ -1427,9 +1428,33 @@ function readAllocations(form) {
   return withAmt
 }
 
+const claimedMailSends = new Set()
+
+function setFormSending(form, sending) {
+  const submit = form.querySelector('button[type="submit"]')
+  if (sending) {
+    form.dataset.busy = '1'
+    if (submit) {
+      if (!submit.dataset.label) submit.dataset.label = submit.textContent
+      submit.disabled = true
+      if (form.dataset.form === 'mail') submit.textContent = 'Versturen…'
+    }
+    form.querySelectorAll('[data-close]').forEach((el) => { el.disabled = true })
+  } else {
+    form.dataset.busy = ''
+    if (submit) {
+      submit.disabled = false
+      if (submit.dataset.label) submit.textContent = submit.dataset.label
+    }
+    form.querySelectorAll('[data-close]').forEach((el) => { el.disabled = false })
+  }
+}
+
 async function onSubmit(e, modal) {
   e.preventDefault()
   const form = e.target
+  if (form.dataset.busy === '1') return
+  setFormSending(form, true)
   const kind = form.dataset.form
   const v = fd(form)
   try {
@@ -1539,14 +1564,26 @@ async function onSubmit(e, modal) {
       return
     }
     if (kind === 'mail') {
-      const sent = await sendMailApi({
-        to: v.to,
-        subject: v.subject,
-        text: v.text,
-        customer_id: v.customer_id,
-        contact_id: v.contact_id,
-        reply_to_id: v.reply_to_id
-      })
+      const token = v.send_token
+      if (token && claimedMailSends.has(token)) {
+        modal?.remove()
+        return
+      }
+      if (token) claimedMailSends.add(token)
+      let sent
+      try {
+        sent = await sendMailApi({
+          to: v.to,
+          subject: v.subject,
+          text: v.text,
+          customer_id: v.customer_id,
+          contact_id: v.contact_id,
+          reply_to_id: v.reply_to_id
+        })
+      } catch (err) {
+        if (token) claimedMailSends.delete(token)
+        throw err
+      }
       modal?.remove()
       await refresh()
       flash('Mail verstuurd')
@@ -1568,6 +1605,7 @@ async function onSubmit(e, modal) {
     await refresh()
     flash('Opgeslagen')
   } catch (err) {
+    setFormSending(form, false)
     alert(err.message || String(err))
   }
 }

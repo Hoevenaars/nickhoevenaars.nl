@@ -1,7 +1,7 @@
 import { json, bearerToken } from '../lib/http.js'
 import { userClient } from '../lib/supabase.js'
 import { sendResendEmail, fromAddress } from '../lib/resend.js'
-import { parseAddress, replySubject, textToHtml, rootThreadId } from '../lib/mail.js'
+import { parseAddress, replySubject, textToHtml, rootThreadId, recentDuplicateOutbound } from '../lib/mail.js'
 
 async function requireAdmin(req) {
   const token = bearerToken(req)
@@ -39,6 +39,18 @@ export default async function handler(req, res) {
     }
     if (!String(subject || '').trim() || !String(text || '').trim()) {
       return json(res, 400, { ok: false, error: 'Onderwerp en bericht zijn verplicht.' })
+    }
+
+    const { data: recentOut } = await sb
+      .from('nh_emails')
+      .select('*')
+      .eq('direction', 'out')
+      .gte('sent_at', new Date(Date.now() - 20000).toISOString())
+      .order('sent_at', { ascending: false })
+      .limit(20)
+    const duplicate = recentDuplicateOutbound(recentOut, { to: dest, subject, text })
+    if (duplicate) {
+      return json(res, 200, { ok: true, email: duplicate })
     }
 
     let parent = null
