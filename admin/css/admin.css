@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0 }
+html { -webkit-text-size-adjust: 100%; }
 html, body { min-height: 100%; }
 body {
   background: var(--bg);
@@ -25,7 +26,10 @@ body {
   font-size: 14px;
   line-height: 1.4;
   position: relative;
+  color-scheme: dark;
 }
+body.modal-open { overflow: hidden; }
+button, a, .nav-btn, .filter, .item, .plus-btn { touch-action: manipulation }
 body::before {
   content: "";
   position: fixed;
@@ -41,7 +45,7 @@ button, input, select, textarea { font: inherit; color: inherit }
 a { color: var(--accent); text-decoration: none }
 a:hover { text-decoration: underline }
 
-.shell { display: flex; min-height: 100vh; position: relative; z-index: 1 }
+.shell { display: flex; min-height: 100vh; min-height: 100dvh; position: relative; z-index: 1 }
 .sidebar {
   width: var(--sidebar);
   flex: 0 0 var(--sidebar);
@@ -218,15 +222,32 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .err { color: var(--bad); font-size: .88rem }
 
 .modal-back {
-  position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 40;
-  display: grid; place-items: center; padding: 1rem
+  position: fixed; left: 0; right: 0;
+  top: var(--app-top, 0px);
+  height: var(--app-height, 100dvh);
+  background: rgba(0,0,0,.55); z-index: 40;
+  display: grid; place-items: center;
+  padding: 1rem;
+  overscroll-behavior: contain;
 }
 .modal {
-  width: min(560px, 100%); max-height: 90vh; overflow: auto;
-  background: #141418; border: 1px solid var(--line-strong); border-radius: 18px; padding: 1.1rem 1.15rem 1.2rem
+  width: min(560px, 100%); max-height: min(90vh, 90dvh); overflow: auto;
+  background: #141418; border: 1px solid var(--line-strong); border-radius: 18px;
+  padding: 1.1rem 1.15rem 1.2rem;
+  display: flex; flex-direction: column; min-height: 0;
+  -webkit-overflow-scrolling: touch;
 }
-.modal h2 { margin-bottom: .8rem; font-size: 1.15rem }
+.modal form.form { flex: 1; min-height: 0; }
+.modal h2 { margin-bottom: .8rem; font-size: 1.15rem; flex: 0 0 auto }
 .actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .4rem; flex-wrap: wrap }
+.modal .actions {
+  position: sticky; bottom: 0;
+  background: #141418;
+  margin: .2rem -1.15rem -1.2rem;
+  padding: .8rem 1.15rem calc(.85rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  z-index: 2;
+}
 .plus { position: relative; z-index: 9 }
 .plus-btn {
   width: 42px; height: 42px; border-radius: 50%;
@@ -298,11 +319,61 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 
 @media (max-width: 860px) {
   .shell { flex-direction: column }
-  .sidebar { width: 100%; flex: none; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .25rem; padding: .8rem }
-  .brand { border: 0; margin: 0; padding: .2rem .5rem .2rem 0 }
+  .sidebar {
+    width: 100%; flex: none; flex-direction: row; flex-wrap: nowrap; align-items: center;
+    gap: .25rem; padding: .55rem .7rem;
+    padding-top: max(.55rem, env(safe-area-inset-top));
+    position: sticky; top: 0; z-index: 15;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .sidebar::-webkit-scrollbar { display: none }
+  .brand { border: 0; margin: 0; padding: .2rem .5rem .2rem 0; flex: 0 0 auto }
   .brand small { display: none }
-  .sidebar .spacer, .userbox { display: none }
-  .nav-btn { width: auto; padding: .45rem .7rem }
+  .sidebar .spacer { display: none }
+  .userbox {
+    display: flex; border: 0; margin: 0 0 0 .2rem; padding: 0; flex: 0 0 auto
+  }
+  .userbox .who { display: none }
+  .nav-btn { width: auto; padding: .5rem .7rem; min-height: 40px; white-space: nowrap; flex: 0 0 auto }
   .form.two, .kv, .tl, .log-bar, .log-more { grid-template-columns: 1fr }
-  .main { padding: 1rem 1rem 2.5rem }
+  .alloc-row { grid-template-columns: 1fr 1fr auto }
+  .main { padding: 1rem 1rem calc(5.5rem + env(safe-area-inset-bottom)) }
+  .search, .field input, .field select, .field textarea,
+  .log-bar input, .log-bar select { font-size: 16px }
+  .modal-back {
+    padding: 0;
+    place-items: stretch;
+  }
+  .modal, .modal.wide {
+    width: 100%; max-width: 100%;
+    height: 100%; max-height: 100%;
+    border-radius: 0; border: 0;
+    padding: max(1rem, env(safe-area-inset-top)) 1rem 0;
+  }
+  .modal .actions {
+    margin-left: -1rem; margin-right: -1rem; margin-bottom: 0;
+    padding-left: 1rem; padding-right: 1rem;
+  }
+  .modal .actions .btn { min-height: 44px; flex: 1 }
+  .field textarea[name="text"] { min-height: 28vh }
+  .plus {
+    position: fixed;
+    right: max(.9rem, env(safe-area-inset-right));
+    bottom: max(.9rem, env(safe-area-inset-bottom));
+    z-index: 25;
+  }
+  .plus-btn {
+    width: 52px; height: 52px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.45)
+  }
+  .plus.open { z-index: 45 }
+  .plus-menu {
+    top: auto; bottom: calc(100% + .5rem);
+    min-width: 210px;
+  }
+  .plus-menu button { min-height: 44px; padding: .7rem .8rem }
+  .tabs, .filters { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none }
+  .tabs::-webkit-scrollbar, .filters::-webkit-scrollbar { display: none }
+  .tab, .filter { flex: 0 0 auto; white-space: nowrap }
 }

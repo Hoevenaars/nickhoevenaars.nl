@@ -1,7 +1,7 @@
 import { json, bearerToken } from '../lib/http.js'
 import { userClient } from '../lib/supabase.js'
 import { sendResendEmail, fromAddress } from '../lib/resend.js'
-import { parseAddress, replySubject, textToHtml, rootThreadId, recentDuplicateOutbound } from '../lib/mail.js'
+import { parseAddress, replySubject, textToHtml, rootThreadId, recentDuplicateOutbound, appendMailFooter } from '../lib/mail.js'
 
 async function requireAdmin(req) {
   const token = bearerToken(req)
@@ -37,7 +37,8 @@ export default async function handler(req, res) {
     if (!dest || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) {
       return json(res, 400, { ok: false, error: 'Vul een geldig e-mailadres in.' })
     }
-    if (!String(subject || '').trim() || !String(text || '').trim()) {
+    const body = appendMailFooter(text)
+    if (!String(subject || '').trim() || !String(body || '').trim()) {
       return json(res, 400, { ok: false, error: 'Onderwerp en bericht zijn verplicht.' })
     }
 
@@ -48,7 +49,7 @@ export default async function handler(req, res) {
       .gte('sent_at', new Date(Date.now() - 20000).toISOString())
       .order('sent_at', { ascending: false })
       .limit(20)
-    const duplicate = recentDuplicateOutbound(recentOut, { to: dest, subject, text })
+    const duplicate = recentDuplicateOutbound(recentOut, { to: dest, subject, text: body })
     if (duplicate) {
       return json(res, 200, { ok: true, email: duplicate })
     }
@@ -63,8 +64,8 @@ export default async function handler(req, res) {
     const sent = await sendResendEmail({
       to: dest,
       subject: parent ? replySubject(subject || parent.subject) : subject,
-      text,
-      html: textToHtml(text),
+      text: body,
+      html: textToHtml(body),
       inReplyTo: parent?.message_id || undefined,
       references: parent?.message_id || undefined
     })
@@ -79,8 +80,8 @@ export default async function handler(req, res) {
       to_emails: [dest],
       cc_emails: [],
       subject: parent ? replySubject(subject || parent.subject) : subject,
-      text_body: text,
-      html_body: textToHtml(text),
+      text_body: body,
+      html_body: textToHtml(body),
       resend_id: sent?.id || null,
       message_id: sent?.id ? `<${sent.id}@resend.dev>` : null,
       in_reply_to: parent?.message_id || null,
