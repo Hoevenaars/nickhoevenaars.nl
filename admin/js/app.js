@@ -17,6 +17,28 @@ let emails = []
 let mailTemplates = []
 let notice = ''
 
+const MAIL_FOOTER = 'Met vriendelijke groet,\nNick Hoevenaars'
+function withMailFooter(body) {
+  const f = MAIL_FOOTER
+  const b = String(body || '').replace(/[ \t]+$/gm, '').replace(/\s+$/, '')
+  if (b.includes(f)) return b
+  if (!b) return `\n\n${f}`
+  return `${b}\n\n${f}`
+}
+
+function closeModal(el) {
+  el?.remove()
+  if (!document.getElementById('modal-root')) document.body.classList.remove('modal-open')
+}
+
+function syncAppViewport() {
+  const vv = window.visualViewport
+  const height = Math.round(vv?.height || window.innerHeight)
+  const top = Math.round(vv?.offsetTop || 0)
+  document.documentElement.style.setProperty('--app-height', height + 'px')
+  document.documentElement.style.setProperty('--app-top', top + 'px')
+}
+
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
 const DT = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
@@ -602,7 +624,7 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Account en mailtemplates. Later komt hier meer.</p>
+        <p class="lead">Account, voettekst en mailtemplates.</p>
       </div>
     </div>
     <div class="stack">
@@ -614,6 +636,13 @@ function settingsView() {
           <dt>Data</dt><dd>Fluweel Supabase, tabellen <code>nh_*</code>.</dd>
           <dt>Versturen</dt><dd>Resend, vanaf <code>contact@nickhoevenaars.nl</code> (Vercel-env <code>EMAIL_FROM</code>).</dd>
           <dt>Ontvangen</dt><dd>Webhook <code>/api/mail-inbound</code>. Zet in TransIP doorsturen aan naar je Resend inbound-adres, MX niet omgooien.</dd>
+        </div>
+      </section>
+      <section class="section">
+        <header><h3>Voettekst</h3></header>
+        <div class="body">
+          <p class="tiny">Onder elke mail, automatisch. Niet in het tekstvak typen.</p>
+          <div class="mail-footer">${esc(MAIL_FOOTER)}</div>
         </div>
       </section>
       <section class="section">
@@ -1332,25 +1361,31 @@ function showModal(kind, payload = {}) {
     wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
       <input type="hidden" name="reply_to_id" value="${esc(existingMail?.id || '')}">
       <input type="hidden" name="contact_id" value="${esc((existingMail?.contact_id || person?.id) || '')}">
+      <input type="hidden" name="send_token" value="${esc(crypto.randomUUID())}">
       <textarea name="quoted" hidden>${esc(quoted)}</textarea>
       ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId, { required: false, allowNone: true })}
       ${mailTemplatePicker()}
       <div class="field full"><label>Aan</label>
-        <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl">
+        <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl" autocomplete="email">
         <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
       </div>
-      <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}"></div>
+      <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}" autocomplete="off"></div>
       <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
+      <div class="field full">
+        <label>Voettekst (automatisch)</label>
+        <div class="mail-footer">${esc(MAIL_FOOTER)}</div>
+      </div>
     `, 'mail', 'Versturen')
     wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (!wrap.innerHTML) return
+  document.body.classList.add('modal-open')
   document.body.appendChild(wrap)
   wrap.querySelectorAll('[data-close]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      wrap.remove()
+      closeModal(wrap)
     })
   })
   wrap.querySelector('form')?.addEventListener('submit', (e) => onSubmit(e, wrap))
@@ -1360,6 +1395,7 @@ function showModal(kind, payload = {}) {
   })
   bindAllocUi(wrap)
   bindMailTemplateSelect(wrap, !!existingMail)
+  if (kind === 'mail') wrap.querySelector('textarea[name="text"]')?.setSelectionRange(0, 0)
 }
 
 function fd(form) {
@@ -1427,9 +1463,33 @@ function readAllocations(form) {
   return withAmt
 }
 
+const claimedMailSends = new Set()
+
+function setFormSending(form, sending) {
+  const submit = form.querySelector('button[type="submit"]')
+  if (sending) {
+    form.dataset.busy = '1'
+    if (submit) {
+      if (!submit.dataset.label) submit.dataset.label = submit.textContent
+      submit.disabled = true
+      if (form.dataset.form === 'mail') submit.textContent = 'Versturen…'
+    }
+    form.querySelectorAll('[data-close]').forEach((el) => { el.disabled = true })
+  } else {
+    form.dataset.busy = ''
+    if (submit) {
+      submit.disabled = false
+      if (submit.dataset.label) submit.textContent = submit.dataset.label
+    }
+    form.querySelectorAll('[data-close]').forEach((el) => { el.disabled = false })
+  }
+}
+
 async function onSubmit(e, modal) {
   e.preventDefault()
   const form = e.target
+  if (form.dataset.busy === '1') return
+  setFormSending(form, true)
   const kind = form.dataset.form
   const v = fd(form)
   try {
@@ -1444,7 +1504,7 @@ async function onSubmit(e, modal) {
       delete v.id
       const row = await upsert('nh_customers', v, id)
       await refresh()
-      modal?.remove()
+      closeModal(modal)
       flash('Klant opgeslagen')
       go('#/klanten/' + row.id + (hash().params.tab ? '?tab=' + hash().params.tab : ''))
       return
@@ -1520,7 +1580,7 @@ async function onSubmit(e, modal) {
         type: v.type, summary: v.summary, outcome: v.outcome, follow_up: v.follow_up
       }, id)
       if (!id) await maybeReminder(customerId, v.follow_up || v.summary, v.remind, null, 'contact_log', row.id)
-      modal?.remove()
+      closeModal(modal)
       await refresh()
       flash(id ? 'Contactmoment aangepast' : 'Contactmoment gelogd')
       return
@@ -1533,21 +1593,33 @@ async function onSubmit(e, modal) {
         subject: v.subject || '',
         body: v.body || ''
       }, id)
-      modal?.remove()
+      closeModal(modal)
       await refresh()
       flash(id ? 'Template aangepast' : 'Template toegevoegd')
       return
     }
     if (kind === 'mail') {
-      const sent = await sendMailApi({
-        to: v.to,
-        subject: v.subject,
-        text: v.text,
-        customer_id: v.customer_id,
-        contact_id: v.contact_id,
-        reply_to_id: v.reply_to_id
-      })
-      modal?.remove()
+      const token = v.send_token
+      if (token && claimedMailSends.has(token)) {
+        closeModal(modal)
+        return
+      }
+      if (token) claimedMailSends.add(token)
+      let sent
+      try {
+        sent = await sendMailApi({
+          to: v.to,
+          subject: v.subject,
+          text: withMailFooter(v.text),
+          customer_id: v.customer_id,
+          contact_id: v.contact_id,
+          reply_to_id: v.reply_to_id
+        })
+      } catch (err) {
+        if (token) claimedMailSends.delete(token)
+        throw err
+      }
+      closeModal(modal)
       await refresh()
       flash('Mail verstuurd')
       go('#/mail/' + sent.id)
@@ -1559,15 +1631,16 @@ async function onSubmit(e, modal) {
       for (const m of thread) {
         await upsert('nh_emails', { customer_id: v.customer_id }, m.id)
       }
-      modal?.remove()
+      closeModal(modal)
       await refresh()
       flash('Gekoppeld aan klant')
       return
     }
-    modal?.remove()
+    closeModal(modal)
     await refresh()
     flash('Opgeslagen')
   } catch (err) {
+    setFormSending(form, false)
     alert(err.message || String(err))
   }
 }
@@ -1766,7 +1839,11 @@ async function boot() {
 
 window.addEventListener('hashchange', () => { if (session) paint() })
 document.addEventListener('click', (e) => {
-  if (e.target.closest('[data-plus]')) return
+  if (e.target.closest('.plus-btn') || e.target.closest('.plus-menu')) return
   document.querySelectorAll('[data-plus].open').forEach((el) => el.classList.remove('open'))
 })
+syncAppViewport()
+window.visualViewport?.addEventListener('resize', syncAppViewport)
+window.visualViewport?.addEventListener('scroll', syncAppViewport)
+window.addEventListener('orientationchange', syncAppViewport)
 boot()
