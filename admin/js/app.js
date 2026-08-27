@@ -2,7 +2,8 @@ import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, sendMailApi, replaceAllocations,
+  TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType, elapsedSeconds, formatElapsed, formatDurationNl,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadTimeEntries, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
@@ -15,7 +16,9 @@ let looseRevenues = []
 let looseTodos = []
 let emails = []
 let mailTemplates = []
+let timeEntries = []
 let notice = ''
+let timerTick = null
 
 const MAIL_FOOTER = 'Met vriendelijke groet,\nNick Hoevenaars'
 function withMailFooter(body) {
@@ -260,8 +263,8 @@ function companyForMail(m) {
 }
 
 async function refresh() {
-  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates] = await Promise.all([
-    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates()
+  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates, timeEntries] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates(), loadTimeEntries()
   ])
   attachEmails()
 }
@@ -269,6 +272,111 @@ async function refresh() {
 function currentCustomerId() {
   const { parts } = hash()
   return (parts[0] === 'klanten' && parts[1]) ? parts[1] : ''
+}
+
+function runningTimer() {
+  return timeEntries.find((t) => !t.ended_at) || null
+}
+
+function companyName(id) {
+  return customers.find((c) => c.id === id)?.company_name || 'Onbekend'
+}
+
+function startTimerTick() {
+  clearInterval(timerTick)
+  const els = [...app.querySelectorAll('[data-elapsed]')]
+  if (!els.length) return
+  const tick = () => {
+    for (const el of els) el.textContent = formatElapsed(elapsedSeconds(el.getAttribute('data-elapsed')))
+  }
+  tick()
+  timerTick = setInterval(tick, 1000)
+}
+
+function timerCard() {
+  const run = runningTimer()
+  if (run) {
+    return `<button type="button" class="timer-strip running" data-go="#/uren">
+      <span class="time-clock small" data-elapsed="${esc(run.started_at)}">0:00</span>
+      <span><b>${esc(companyName(run.customer_id))}</b> · ${esc(timeTypeLabel(run.type))} · openen om te stoppen</span>
+    </button>`
+  }
+  return `<button type="button" class="timer-strip" data-go="#/uren">
+    <b>Start uren</b>
+    <span class="muted">Kies type en opdrachtgever, daarna start</span>
+  </button>`
+}
+
+function todayTimeRows() {
+  const today = isoDate()
+  return timeEntries.filter((t) => t.ended_at && isoDate(new Date(t.started_at)) === today)
+}
+
+function timeTodayList() {
+  const run = runningTimer()
+  const done = todayTimeRows()
+  const todaySec = done.reduce((s, t) => s + Number(t.seconds || 0), 0) + (run ? elapsedSeconds(run.started_at) : 0)
+  return `
+    <section class="section" style="margin-top:1.2rem">
+      <header><h3>Vandaag${todaySec ? ' · ' + formatDurationNl(todaySec) : ''}</h3></header>
+      <div class="body">
+        ${done.length ? `<div class="list">${done.map((t) => `
+          <div class="item" style="cursor:default">
+            <b>${esc(timeTypeLabel(t.type))} · ${esc(formatDurationNl(t.seconds))}</b>
+            <small>${esc(companyName(t.customer_id))}${t.note ? ' · ' + esc(t.note) : ''} · ${fmtDateTime(t.started_at)}</small>
+          </div>`).join('')}</div>` : '<p class="muted">Nog geen gestopte uren vandaag.</p>'}
+      </div>
+    </section>`
+}
+
+function urenView() {
+  const run = runningTimer()
+  const preselect = hash().params.customer || currentCustomerId() || ''
+  if (run) {
+    return shell(`
+      <div class="page-head">
+        <div>
+          <h1>Uren</h1>
+          <p class="lead">Timer loopt. Stop als je klaar bent.</p>
+        </div>
+        ${plusBar()}
+      </div>
+      <div class="time-run">
+        <p class="time-clock" data-elapsed="${esc(run.started_at)}">0:00</p>
+        <p class="lead">${esc(companyName(run.customer_id))} · ${esc(timeTypeLabel(run.type))}</p>
+        <form class="form" data-form="time-stop">
+          <input type="hidden" name="id" value="${esc(run.id)}">
+          <div class="field full"><label>Toelichting</label><input name="note" value="${esc(run.note || '')}" placeholder="Optioneel, bijv. homepage of belletje over offerte"></div>
+          <button class="btn time-go stop" type="submit">Stop</button>
+        </form>
+      </div>
+      ${timeTodayList()}
+    `, 'time')
+  }
+  return shell(`
+    <div class="page-head">
+      <div>
+        <h1>Uren</h1>
+        <p class="lead">Kies type, kies opdrachtgever, start. Eén timer tegelijk.</p>
+      </div>
+      ${plusBar()}
+    </div>
+    ${customers.length ? `
+    <form class="form time-start-form" data-form="time-start">
+      <div class="field full"><label>Type</label>
+        <div class="time-types">
+          ${TIME_TYPES.map((t) => `
+            <label class="time-type">
+              <input type="radio" name="type" value="${esc(t.id)}" required>
+              <span>${esc(t.label)}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      ${customerPicker(preselect)}
+      <button class="btn time-go" type="submit">Start</button>
+    </form>` : '<p class="muted">Voeg eerst een opdrachtgever toe via + → Klant.</p>'}
+    ${timeTodayList()}
+  `, 'time')
 }
 
 function plusBar() {
@@ -354,6 +462,7 @@ function shell(content, active) {
     <aside class="sidebar">
       <div class="brand">NH<span>.</span><small>Admin</small></div>
       <button class="nav-btn ${active === 'dashboard' ? 'active' : ''}" data-go="#/dashboard">Dashboard</button>
+      <button class="nav-btn ${active === 'time' ? 'active' : ''}" data-go="#/uren">Uren${runningTimer() ? ' <span class="chip blue">aan</span>' : ''}</button>
       <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Opdrachtgevers</button>
       <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Funnel</button>
       <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">Taken</button>
@@ -479,6 +588,7 @@ function dashboardView() {
       </div>
       ${plusBar()}
     </div>
+    ${timerCard()}
     ${queueHtml(workItems())}
     <button type="button" class="strip" data-go="#/geld">
       <span>Deze maand <b class="${resultOnce >= 0 ? 'good' : 'bad'}">${money(resultOnce)}</b></span>
@@ -824,7 +934,12 @@ function customerWorkTab(c) {
   const openReminders = c.reminders.filter((r) => !r.done)
   const openIdeas = c.ideas.filter((i) => !i.converted_todo_id && !i.converted_opportunity_id)
   const empty = !c.openTodos.length && !c.openOpps.length && !openReminders.length && !openIdeas.length
+  const today = isoDate()
+  const hoursToday = timeEntries.filter((t) => t.customer_id === c.id && t.ended_at && isoDate(new Date(t.started_at)) === today)
+  const run = runningTimer()
+  const hourSec = hoursToday.reduce((s, t) => s + Number(t.seconds || 0), 0) + (run?.customer_id === c.id ? elapsedSeconds(run.started_at) : 0)
   return `
+    ${hourSec ? `<p class="tiny">Uren vandaag: ${esc(formatDurationNl(hourSec))}${run?.customer_id === c.id ? ' (loopt)' : ''}</p>` : ''}
     ${empty ? '<p class="muted">Niets open. Log contact of voeg een taak toe.</p>' : ''}
     ${c.openTodos.length ? `<section class="section">
       <header><h3>Taken</h3><button class="btn ghost small" data-open="todo" data-customer="${c.id}">Toevoegen</button></header>
@@ -982,6 +1097,7 @@ function customerView(c) {
       </div>
       ${plusBar()}
     </div>
+    <p class="tiny" style="margin-bottom:.7rem"><a href="#/uren?customer=${esc(c.id)}">Start uren voor deze opdrachtgever</a></p>
     ${logBar(c)}
     ${customerTabs(c, tab)}
     <div class="stack">${tabBody}</div>
@@ -1499,6 +1615,47 @@ async function onSubmit(e, modal) {
       await boot()
       return
     }
+    if (kind === 'time-start') {
+      if (runningTimer()) { flash('Er loopt al een timer'); return }
+      if (!v.customer_id || !v.type) throw new Error('Kies type en opdrachtgever.')
+      await upsert('nh_time_entries', {
+        customer_id: v.customer_id,
+        type: v.type,
+        started_at: new Date().toISOString()
+      })
+      await refresh()
+      flash('Timer gestart')
+      go('#/uren')
+      return
+    }
+    if (kind === 'time-stop') {
+      const row = timeEntries.find((t) => t.id === v.id) || runningTimer()
+      if (!row) throw new Error('Geen lopende timer.')
+      const ended = new Date()
+      const seconds = elapsedSeconds(row.started_at, ended)
+      const note = (v.note || '').trim()
+      const summary = [timeTypeLabel(row.type), formatDurationNl(seconds), note].filter(Boolean).join(' · ')
+      let logId = null
+      if (row.customer_id) {
+        const log = await upsert('nh_contact_logs', {
+          customer_id: row.customer_id,
+          type: mapTimeTypeToLogType(row.type),
+          summary,
+          occurred_at: new Date(row.started_at).toISOString()
+        })
+        logId = log.id
+      }
+      await upsert('nh_time_entries', {
+        ended_at: ended.toISOString(),
+        seconds,
+        note: note || null,
+        contact_log_id: logId
+      }, row.id)
+      await refresh()
+      flash('Gestopt · ' + formatDurationNl(seconds))
+      go('#/uren')
+      return
+    }
     if (kind === 'customer') {
       const id = v.id
       delete v.id
@@ -1666,6 +1823,7 @@ async function paint() {
   } else if (page === 'klanten') app.innerHTML = customersView(params)
   else if (page === 'sales') app.innerHTML = salesView()
   else if (page === 'todos') app.innerHTML = todosView()
+  else if (page === 'uren') app.innerHTML = urenView()
   else if (page === 'geld') app.innerHTML = moneyView()
   else if (page === 'instellingen') app.innerHTML = settingsView()
   else app.innerHTML = dashboardView()
@@ -1709,6 +1867,8 @@ function bind() {
     await sb.auth.signOut()
     session = null
     customers = []
+    timeEntries = []
+    clearInterval(timerTick)
     app.className = ''
     app.innerHTML = loginView()
     bind()
@@ -1815,6 +1975,7 @@ function bind() {
     }
     await refresh(); flash('Idee omgezet')
   }))
+  startTimerTick()
 }
 
 async function boot() {

@@ -1,5 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
+import {
+  TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
+  elapsedSeconds, formatElapsed, formatDurationNl
+} from '../../lib/time.js'
+
+export {
+  TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
+  elapsedSeconds, formatElapsed, formatDurationNl
+}
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
@@ -71,7 +80,7 @@ export function phaseLabel(id) {
 }
 
 export function typeLabel(id) {
-  return CONTACT_TYPES.find((t) => t.id === id)?.label || id || '—'
+  return CONTACT_TYPES.find((t) => t.id === id)?.label || timeTypeLabel(id) || id || '—'
 }
 
 export function statusLabel(id) {
@@ -217,6 +226,19 @@ export async function loadEmails() {
     .limit(400)
   if (error) {
     console.warn('nh_emails:', error.message)
+    return []
+  }
+  return data || []
+}
+
+export async function loadTimeEntries() {
+  const { data, error } = await sb
+    .from('nh_time_entries')
+    .select('*')
+    .order('started_at', { ascending: false })
+    .limit(80)
+  if (error) {
+    console.warn('nh_time_entries:', error.message)
     return []
   }
   return data || []

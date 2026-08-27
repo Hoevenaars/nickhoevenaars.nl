@@ -327,6 +327,37 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .queue-main small { color: var(--muted); font-size: .78rem }
 .queue.overdue h3 { color: var(--bad) }
 
+.timer-strip {
+  display: flex; flex-wrap: wrap; gap: .45rem 1rem; align-items: baseline;
+  width: 100%; text-align: left; cursor: pointer; color: inherit;
+  padding: .7rem .9rem; margin-bottom: .9rem;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: rgba(255,255,255,.02)
+}
+.timer-strip:hover { border-color: rgba(59,130,246,.4); text-decoration: none }
+.timer-strip.running { border-color: rgba(59,130,246,.45); background: rgba(59,130,246,.1) }
+.time-clock {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 2.6rem; font-weight: 700; letter-spacing: -.04em; line-height: 1.1
+}
+.time-clock.small { font-size: 1.25rem }
+.time-run { text-align: center; padding: .4rem 0 1rem }
+.time-run .lead { margin-top: .35rem }
+.time-run .form { text-align: left; margin-top: 1rem }
+.time-types { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem }
+.time-type {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  min-height: 48px; padding: .55rem .7rem; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--line-strong); background: rgba(255,255,255,.02)
+}
+.time-type input { position: absolute; opacity: 0; pointer-events: none }
+.time-type:has(input:checked) {
+  border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.14)
+}
+.btn.time-go { width: 100%; min-height: 52px; font-size: 1.05rem; margin-top: .2rem }
+.btn.time-go.stop { background: linear-gradient(135deg, #7f1d1d, #dc2626) }
+.time-start-form .field label { margin-bottom: .15rem }
+
 @media (max-width: 860px) {
   .shell { flex-direction: column }
   .sidebar {
@@ -386,4 +417,6 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   .tabs, .filters { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none }
   .tabs::-webkit-scrollbar, .filters::-webkit-scrollbar { display: none }
   .tab, .filter { flex: 0 0 auto; white-space: nowrap }
+  .time-clock { font-size: 3rem }
+  .btn.time-go { min-height: 56px }
 }
