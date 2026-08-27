@@ -187,7 +187,7 @@ function prioChip(p) {
 }
 
 function primaryContact(c) {
-  return c.contacts.find((x) => x.is_primary) || c.contacts[0] || null
+  return c?.contacts?.find((x) => x.is_primary) || c?.contacts?.[0] || null
 }
 
 function stale(c) {
@@ -1401,7 +1401,7 @@ function showModal(kind, payload = {}) {
           <button type="button" class="btn ghost small" data-clear-alloc>Alles loskoppelen</button>
         </div>
       </div>`, 'cost')
-    wrap.querySelector('.modal').classList.add('wide')
+    wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (kind === 'template') {
     wrap.innerHTML = modalHtml(existingTemplate ? 'Template bewerken' : 'Nieuw template', `
@@ -1410,7 +1410,7 @@ function showModal(kind, payload = {}) {
       <div class="field full"><label>Onderwerp</label><input name="subject" value="${esc(existingTemplate?.subject || '')}"></div>
       <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Hoi,">${esc(existingTemplate?.body || '')}</textarea></div>
     `, 'template')
-    wrap.querySelector('.modal').classList.add('wide')
+    wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (kind === 'mail') {
     const person = primaryContact(c)
@@ -1435,19 +1435,18 @@ function showModal(kind, payload = {}) {
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}"></div>
       <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
     `, 'mail', 'Versturen')
-    wrap.querySelector('.modal').classList.add('wide')
+    wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (!wrap.innerHTML) return
-  if (needCustomer && kind !== 'customer' && !c && !wrap.querySelector('[name="customer_id"]')) {
-    /* picker already included */
-  }
   document.body.appendChild(wrap)
-  wrap.addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-back')) wrap.remove()
-    if (e.target.closest('button[data-close]')) wrap.remove()
+  wrap.querySelectorAll('[data-close]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      wrap.remove()
+    })
   })
-  wrap.querySelector('.modal').addEventListener('click', (e) => e.stopPropagation())
-  wrap.querySelector('form').addEventListener('submit', (e) => onSubmit(e, wrap))
+  wrap.querySelector('form')?.addEventListener('submit', (e) => onSubmit(e, wrap))
   const quick = wrap.querySelector('select[name="quick"]')
   if (quick) quick.addEventListener('change', () => {
     if (quick.value) wrap.querySelector('[name="remind_at"]').value = addDays(Number(quick.value))
@@ -1745,7 +1744,12 @@ function bind() {
     const customer = (kind === 'customer' && el.getAttribute('data-id'))
       ? customers.find((c) => c.id === el.getAttribute('data-id'))
       : customers.find((c) => c.id === customerId)
-    showModal(kind, { customer, customerId: customer?.id || customerId, recordId })
+    try {
+      showModal(kind, { customer, customerId: customer?.id || customerId, recordId })
+    } catch (err) {
+      console.error(err)
+      alert(err.message || String(err))
+    }
   }))
   app.querySelectorAll('[data-toggle-more]').forEach((el) => el.addEventListener('click', (e) => {
     e.preventDefault()
