@@ -188,7 +188,7 @@ function stale(c) {
 function matchesQuery(c, q) {
   if (!q) return true
   const blob = [
-    c.company_name, c.extra_notes, c.website, c.address,
+    c.company_name, c.extra_notes, c.website, c.address, c.phone,
     ...c.contacts.flatMap((p) => [p.name, p.email, p.phone, p.role]),
     ...c.logs.flatMap((l) => [l.summary, l.outcome, l.follow_up]),
     ...c.todos.map((t) => t.title + ' ' + (t.note || '')),
@@ -944,7 +944,9 @@ function customerView(c) {
         <h1>${esc(c.company_name)}</h1>
         <p class="lead cust-meta">
           <span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span>
-          ${person ? `<span>${esc(person.name)}${contactLinks(person) ? ' · ' + contactLinks(person) : ''}</span>` : '<span class="muted">Geen contactpersoon</span>'}
+          ${person ? `<span>${esc(person.name)}${contactLinks(person) ? ' · ' + contactLinks(person) : ''}</span>` : ''}
+          ${c.phone && c.phone !== person?.phone ? `<span>${contactLinks({ phone: c.phone })}</span>` : ''}
+          ${!person && !c.phone ? '<span class="muted">Geen contactpersoon</span>' : ''}
           <span class="muted">Laatst ${c.lastContactAt ? fmtDate(c.lastContactAt) : '—'}</span>
           <span>Volgende ${esc(c.nextAction?.label || '—')}${c.nextAction?.at ? ' · ' + fmtDate(c.nextAction.at) : ''}</span>
         </p>
@@ -1137,7 +1139,8 @@ function customerForm(c = {}) {
     <div class="field"><label>Bedrijfsnaam</label><input name="company_name" required value="${esc(c.company_name || '')}"></div>
     <div class="field"><label>Status</label><select name="status">${options(CUSTOMER_STATUSES, c.status || 'prospect')}</select></div>
     <div class="field"><label>Website</label><input name="website" value="${esc(c.website || '')}" placeholder="https://"></div>
-    <div class="field"><label>Adres</label><input name="address" value="${esc(c.address || '')}"></div>
+    <div class="field"><label>Telefoon</label><input name="phone" value="${esc(c.phone || '')}" placeholder="06 12345678" inputmode="tel"></div>
+    <div class="field full"><label>Adres</label><input name="address" value="${esc(c.address || '')}"></div>
     <div class="field full"><label>Extra notities bij contactgegevens</label><textarea name="extra_notes">${esc(c.extra_notes || '')}</textarea></div>
     <div class="field"><label>Tarief / prijsafspraak</label><input name="price_arrangement" value="${esc(c.price_arrangement || '')}"></div>
     <div class="field"><label>Korting</label><input name="discount" value="${esc(c.discount || '')}"></div>
