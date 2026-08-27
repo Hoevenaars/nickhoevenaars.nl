@@ -197,6 +197,18 @@ export async function loadLooseTodos() {
   return data || []
 }
 
+export async function loadMailTemplates() {
+  const { data, error } = await sb
+    .from('nh_mail_templates')
+    .select('*')
+    .order('name')
+  if (error) {
+    console.warn('nh_mail_templates:', error.message)
+    return []
+  }
+  return data || []
+}
+
 export async function loadEmails() {
   const { data, error } = await sb
     .from('nh_emails')
