@@ -162,7 +162,17 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   background: transparent; border: 1px solid var(--line); border-radius: 10px;
   padding: .5rem .65rem; cursor: pointer; color: inherit
 }
-.item:hover { border-color: rgba(59,130,246,.4); background: rgba(59,130,246,.06) }
+.item.unread b { font-weight: 700 }
+.mail-frame {
+  width: 100%; min-height: 220px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; margin-top: .55rem
+}
+.mail-text {
+  white-space: pre-wrap; font-family: inherit; font-size: .9rem;
+  margin-top: .55rem; color: var(--ink)
+}
+.mail-msg header { align-items: baseline }
+.nav-btn .chip { margin-left: .15rem; font-size: .68rem; padding: 0 .4rem }
 .item b { display: block; font-weight: 500 }
 .item small { color: var(--muted) }
 

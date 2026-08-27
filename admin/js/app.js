@@ -2,7 +2,7 @@ import {
   sb, PHASES, PHASE_VALUES, CONTACT_TYPES, CUSTOMER_STATUSES,
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, replaceAllocations,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
@@ -13,6 +13,7 @@ let customers = []
 let costs = []
 let looseRevenues = []
 let looseTodos = []
+let emails = []
 let notice = ''
 
 const D = new Intl.DateTimeFormat('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -192,15 +193,54 @@ function matchesQuery(c, q) {
     ...c.todos.map((t) => t.title + ' ' + (t.note || '')),
     ...c.notes.map((n) => n.body),
     ...c.ideas.map((i) => i.title + ' ' + (i.body || '')),
-    ...c.opps.map((o) => o.title + ' ' + (o.notes || '') + ' ' + (o.next_action || ''))
+    ...c.opps.map((o) => o.title + ' ' + (o.notes || '') + ' ' + (o.next_action || '')),
+    ...(c.emails || []).flatMap((m) => [m.subject, m.from_email, ...(m.to_emails || [])])
   ].join(' ').toLowerCase()
   return blob.includes(q)
 }
 
+function attachEmails() {
+  for (const c of customers) {
+    c.emails = emails.filter((m) => m.customer_id === c.id)
+  }
+}
+
+function unreadMailCount() {
+  return emails.filter((m) => m.direction === 'in' && !m.read_at).length
+}
+
+function threadRoot(email) {
+  return email?.thread_id || email?.id || ''
+}
+
+function threadOf(id) {
+  const start = emails.find((m) => m.id === id)
+  if (!start) return []
+  const root = threadRoot(start)
+  return emails
+    .filter((m) => m.id === root || m.thread_id === root)
+    .sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at)))
+}
+
+function latestThreads(list = emails) {
+  const groups = new Map()
+  for (const email of list) {
+    const id = threadRoot(email)
+    const cur = groups.get(id)
+    if (!cur || String(email.sent_at) > String(cur.sent_at)) groups.set(id, email)
+  }
+  return [...groups.values()].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))
+}
+
+function companyForMail(m) {
+  return customers.find((c) => c.id === m.customer_id)?.company_name || m.from_name || m.from_email || 'Onbekend'
+}
+
 async function refresh() {
-  ;[customers, costs, looseRevenues, looseTodos] = await Promise.all([
-    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos()
+  ;[customers, costs, looseRevenues, looseTodos, emails] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails()
   ])
+  attachEmails()
 }
 
 function currentCustomerId() {
@@ -214,6 +254,7 @@ function plusBar() {
     ['todo', 'Taak', cid],
     ['opp', 'Kans', cid],
     ['quote', 'Offerte', cid],
+    ['mail', 'E-mail', cid],
     ['revenue', 'Opbrengst', cid],
     ['contact', 'Contactpersoon', cid],
     ['cost', 'Kosten', cid]
@@ -222,6 +263,7 @@ function plusBar() {
     ['todo', 'Taak', ''],
     ['activity', 'Contact', ''],
     ['quote', 'Offerte', ''],
+    ['mail', 'E-mail', ''],
     ['cost', 'Kosten', ''],
     ['revenue', 'Opbrengst', '']
   ]
@@ -292,6 +334,7 @@ function shell(content, active) {
       <button class="nav-btn ${active === 'customers' ? 'active' : ''}" data-go="#/klanten">Klanten</button>
       <button class="nav-btn ${active === 'sales' ? 'active' : ''}" data-go="#/sales">Sales</button>
       <button class="nav-btn ${active === 'todos' ? 'active' : ''}" data-go="#/todos">Taken</button>
+      <button class="nav-btn ${active === 'mail' ? 'active' : ''}" data-go="#/mail">Mail${unreadMailCount() ? ` <span class="chip blue">${unreadMailCount()}</span>` : ''}</button>
       <button class="nav-btn ${active === 'money' ? 'active' : ''}" data-go="#/geld">Geld</button>
       <button class="nav-btn nav-settings ${active === 'settings' ? 'active' : ''}" data-go="#/instellingen">Instellingen</button>
       <div class="spacer"></div>
@@ -367,6 +410,9 @@ function workItems() {
     } else if (stale(c)) {
       push('week', c.company_name, `Stil · ${daysSince(c.lastContactAt)} dagen`, `#/klanten/${c.id}`, c.lastContactAt, daysSince(c.lastContactAt) + ' d')
     }
+  }
+  for (const m of emails.filter((e) => e.direction === 'in' && !e.read_at)) {
+    push('today', m.subject || '(geen onderwerp)', `Mail · ${companyForMail(m)}`, `#/mail/${m.id}`, m.sent_at, 'ongelezen')
   }
 
   const order = { overdue: 0, today: 1, week: 2 }
@@ -555,7 +601,7 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Eén gebruiker. Geen mail vanuit deze omgeving.</p>
+        <p class="lead">Eén gebruiker. Mail via Resend vanuit deze admin; TransIP blijft de mailbox-backup.</p>
       </div>
     </div>
     <div class="stack">
@@ -565,6 +611,14 @@ function settingsView() {
           <dt>E-mail</dt><dd>${esc(session.user.email)}</dd>
           <dt>Rol</dt><dd>Admin</dd>
           <dt>Data</dt><dd>Fluweel Supabase, tabellen <code>nh_*</code>.</dd>
+          <dt>Versturen</dt><dd>Resend, vanaf <code>nick@nickhoevenaars.nl</code> (Vercel-env <code>EMAIL_FROM</code>).</dd>
+          <dt>Ontvangen</dt><dd>Webhook <code>/api/mail-inbound</code>. Zet in TransIP doorsturen aan naar je Resend inbound-adres, MX niet omgooien.</dd>
+        </div>
+      </section>
+      <section class="section">
+        <header><h3>Mail</h3></header>
+        <div class="body">
+          <p class="tiny">Ongelezen: ${unreadMailCount()}. Totaal: ${emails.length}.</p>
         </div>
       </section>
     </div>
@@ -718,7 +772,8 @@ function logBar(c) {
 }
 
 function customerTabs(c, tab) {
-  const tabs = [['werk', 'Werk'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Geld']]
+  const unread = (c.emails || []).filter((m) => m.direction === 'in' && !m.read_at).length
+  const tabs = [['werk', 'Werk'], ['mail', unread ? `Mail (${unread})` : 'Mail'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Geld']]
   return `<div class="tabs">${tabs.map(([id, label]) =>
     `<button type="button" class="tab ${tab === id ? 'active' : ''}" data-go="#/klanten/${c.id}?tab=${id}">${label}</button>`
   ).join('')}</div>`
@@ -864,10 +919,11 @@ function customerMoneyTab(c) {
 
 function customerView(c) {
   const person = primaryContact(c)
-  const tab = ['werk', 'tijdlijn', 'gegevens', 'geld'].includes(hash().params.tab) ? hash().params.tab : 'werk'
+  const tab = ['werk', 'mail', 'tijdlijn', 'gegevens', 'geld'].includes(hash().params.tab) ? hash().params.tab : 'werk'
   const tabBody = tab === 'tijdlijn' ? customerTimelineTab(c)
     : tab === 'gegevens' ? customerDetailsTab(c)
     : tab === 'geld' ? customerMoneyTab(c)
+    : tab === 'mail' ? customerMailTab(c)
     : customerWorkTab(c)
   return shell(`
     <div class="page-head">
@@ -916,13 +972,115 @@ function localInput(d) {
   return x.toISOString().slice(0, 16)
 }
 
-function modalHtml(title, body, formName) {
+function customerMailTab(c) {
+  const rows = latestThreads(c.emails || [])
+  return `
+    <section class="section">
+      <header>
+        <h3>Mail</h3>
+        <button class="btn ghost small" data-open="mail" data-customer="${c.id}">Nieuwe mail</button>
+      </header>
+      <div class="body">
+        ${rows.length ? `<div class="list">${rows.map((m) => mailRow(m)).join('')}</div>` : '<p class="muted">Nog geen mail met deze klant. Stuur de eerste vanuit + of hierboven.</p>'}
+      </div>
+    </section>`
+}
+
+function mailRow(m) {
+  const unread = m.direction === 'in' && !m.read_at
+  const who = m.direction === 'in' ? (m.from_name || m.from_email) : (m.to_emails || []).join(', ')
+  return `<button type="button" class="item ${unread ? 'unread' : ''}" data-go="#/mail/${m.id}">
+    <b>${esc(m.subject || '(geen onderwerp)')} ${unread ? '<span class="chip blue">nieuw</span>' : ''} <span class="chip">${m.direction === 'in' ? 'In' : 'Uit'}</span></b>
+    <small>${esc(companyForMail(m))} · ${esc(who)} · ${fmtDateTime(m.sent_at)}</small>
+  </button>`
+}
+
+function mailListView(params) {
+  const q = (params.q || '').trim().toLowerCase()
+  const f = params.f || 'alle'
+  let rows = latestThreads()
+  if (f === 'ongelezen') rows = rows.filter((m) => threadOf(m.id).some((x) => x.direction === 'in' && !x.read_at))
+  if (f === 'in') rows = rows.filter((m) => m.direction === 'in')
+  if (f === 'uit') rows = rows.filter((m) => m.direction === 'out')
+  if (q) {
+    rows = rows.filter((m) => {
+      const blob = [m.subject, m.from_email, m.from_name, ...(m.to_emails || []), companyForMail(m), m.text_body].join(' ').toLowerCase()
+      return blob.includes(q)
+    })
+  }
+  const filters = [['alle', 'Alle'], ['ongelezen', 'Ongelezen'], ['in', 'Ontvangen'], ['uit', 'Verstuurd']]
+  return shell(`
+    <div class="page-head">
+      <div>
+        <h1>Mail</h1>
+        <p class="lead">${unreadMailCount() ? unreadMailCount() + ' ongelezen. ' : ''}Versturen en lezen op één plek.</p>
+      </div>
+      ${plusBar()}
+    </div>
+    <div class="topbar">
+      <input class="search" data-search="mail" value="${esc(params.q || '')}" placeholder="Zoek onderwerp of adres">
+    </div>
+    <div class="filters">
+      ${filters.map(([id, label]) => `<button class="filter ${f === id ? 'active' : ''}" data-go="#/mail?f=${id}${q ? '&q=' + encodeURIComponent(params.q) : ''}">${label}</button>`).join('')}
+    </div>
+    <div class="list">${rows.map(mailRow).join('') || '<p class="muted">Nog geen mail. Stuur er een via + → E-mail.</p>'}</div>
+  `, 'mail')
+}
+
+function mailBodyHtml(m) {
+  if (m.html_body) {
+    return `<iframe class="mail-frame" sandbox="" srcdoc="${esc(m.html_body)}" title="Mailinhoud"></iframe>`
+  }
+  return `<pre class="mail-text">${esc(m.text_body || '(geen inhoud)')}</pre>`
+}
+
+function mailThreadView(id) {
+  const messages = threadOf(id)
+  if (!messages.length) {
+    return shell('<p>Mail niet gevonden.</p><p class="tiny"><a href="#/mail">← Inbox</a></p>', 'mail')
+  }
+  const latest = messages[messages.length - 1]
+  const company = companyForMail(latest)
+  const cid = latest.customer_id
+  return shell(`
+    <div class="page-head">
+      <div>
+        <p class="tiny"><a href="#/mail">← Inbox</a>${cid ? ` · <a href="#/klanten/${cid}?tab=mail">${esc(company)}</a>` : ''}</p>
+        <h1>${esc(latest.subject || '(geen onderwerp)')}</h1>
+        <p class="lead">${esc(company)} · ${messages.length} ${messages.length === 1 ? 'bericht' : 'berichten'}</p>
+      </div>
+      <div class="row-actions">
+        <button class="btn" data-open="mail" data-record="${latest.id}"${cid ? ` data-customer="${cid}"` : ''}>Beantwoorden</button>
+      </div>
+    </div>
+    ${!cid ? `<form class="log-bar" data-form="link-mail" data-mail="${latest.id}">
+      <span class="tiny">Niet gekoppeld</span>
+      <select name="customer_id" required aria-label="Klant">${customers.map((c) => `<option value="${esc(c.id)}">${esc(c.company_name)}</option>`).join('')}</select>
+      <span></span>
+      <button class="btn small" type="submit">Koppelen</button>
+    </form>` : ''}
+    <div class="stack">${messages.map((m) => `
+      <article class="section mail-msg ${m.direction === 'in' && !m.read_at ? 'unread' : ''}">
+        <header>
+          <h3>${m.direction === 'in' ? 'Ontvangen' : 'Verstuurd'} · ${esc(m.from_name || m.from_email)}</h3>
+          <span class="tiny">${fmtDateTime(m.sent_at)}</span>
+        </header>
+        <div class="body">
+          <p class="tiny">Van ${esc(m.from_email)} → ${esc((m.to_emails || []).join(', ') || '—')}</p>
+          ${mailBodyHtml(m)}
+        </div>
+      </article>`).join('')}
+    </div>
+  `, 'mail')
+}
+
+function modalHtml(title, body, formName, submitLabel = 'Opslaan') {
   return `<div class="modal-back"><div class="modal">
     <h2>${esc(title)}</h2>
     <form class="form two" data-form="${formName}">${body}
       <div class="actions full field" style="grid-column:1/-1">
         <button type="button" class="btn ghost" data-close="1">Annuleren</button>
-        <button class="btn" type="submit">Opslaan</button>
+        <button class="btn" type="submit">${esc(submitLabel)}</button>
       </div>
     </form>
   </div></div>`
@@ -999,7 +1157,8 @@ function showModal(kind, payload = {}) {
   const existingQuote = kind === 'quote' && payload.recordId ? allQuotes().find((q) => q.id === payload.recordId) : null
   const existingRev = kind === 'revenue' && payload.recordId ? allRevenuesList().find((r) => r.id === payload.recordId) : null
   const existingCost = kind === 'cost' && payload.recordId ? costs.find((x) => x.id === payload.recordId) : null
-  const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || ''
+  const existingMail = kind === 'mail' && payload.recordId ? emails.find((m) => m.id === payload.recordId) : null
+  const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || existingMail?.customer_id || ''
   const c = payload.customer || customers.find((x) => x.id === customerId)
   const needCustomer = !c && ['opp', 'contact', 'activity', 'quote'].includes(kind) && !payload.recordId
   if (kind === 'customer') wrap.innerHTML = modalHtml(payload.customer?.id ? 'Klant bewerken' : 'Nieuwe klant', customerForm(payload.customer || {}), 'customer')
@@ -1100,6 +1259,28 @@ function showModal(kind, payload = {}) {
           <button type="button" class="btn ghost small" data-clear-alloc>Alles loskoppelen</button>
         </div>
       </div>`, 'cost')
+    wrap.querySelector('.modal').classList.add('wide')
+  }
+  if (kind === 'mail') {
+    const person = primaryContact(c)
+    const to = existingMail
+      ? (existingMail.direction === 'in' ? existingMail.from_email : ((existingMail.to_emails || [])[0] || ''))
+      : (person?.email || '')
+    const subject = existingMail
+      ? (/^re\s*:/i.test(existingMail.subject || '') ? existingMail.subject : `Re: ${existingMail.subject || ''}`)
+      : ''
+    const contactsWithMail = (c?.contacts || []).filter((p) => p.email)
+    wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
+      <input type="hidden" name="reply_to_id" value="${esc(existingMail?.id || '')}">
+      <input type="hidden" name="contact_id" value="${esc((existingMail?.contact_id || person?.id) || '')}">
+      ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId, { required: false, allowNone: true })}
+      <div class="field full"><label>Aan</label>
+        <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl">
+        <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
+      </div>
+      <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}"></div>
+      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${existingMail && existingMail.text_body ? `\n\n\n> ${esc(String(existingMail.text_body).split('\n').join('\n> '))}` : ''}</textarea></div>
+    `, 'mail', 'Versturen')
     wrap.querySelector('.modal').classList.add('wide')
   }
   if (!wrap.innerHTML) return
@@ -1283,6 +1464,32 @@ async function onSubmit(e, modal) {
       flash(id ? 'Contactmoment aangepast' : 'Contactmoment gelogd')
       return
     }
+    if (kind === 'mail') {
+      const sent = await sendMailApi({
+        to: v.to,
+        subject: v.subject,
+        text: v.text,
+        customer_id: v.customer_id,
+        contact_id: v.contact_id,
+        reply_to_id: v.reply_to_id
+      })
+      modal?.remove()
+      await refresh()
+      flash('Mail verstuurd')
+      go('#/mail/' + sent.id)
+      return
+    }
+    if (kind === 'link-mail') {
+      const id = form.dataset.mail
+      const thread = threadOf(id)
+      for (const m of thread) {
+        await upsert('nh_emails', { customer_id: v.customer_id }, m.id)
+      }
+      modal?.remove()
+      await refresh()
+      flash('Gekoppeld aan klant')
+      return
+    }
     modal?.remove()
     await refresh()
     flash('Opgeslagen')
@@ -1294,10 +1501,20 @@ async function onSubmit(e, modal) {
 async function paint() {
   const { parts, params } = hash()
   const page = parts[0] || 'dashboard'
-  if (page === 'klanten' && parts[1]) {
+  if (page === 'mail' && parts[1]) {
+    const thread = threadOf(parts[1])
+    const unread = thread.filter((m) => m.direction === 'in' && !m.read_at)
+    if (unread.length) {
+      await Promise.all(unread.map((m) => upsert('nh_emails', { read_at: new Date().toISOString() }, m.id)))
+      await refresh()
+    }
+    app.innerHTML = mailThreadView(parts[1])
+  } else if (page === 'mail') app.innerHTML = mailListView(params)
+  else if (page === 'klanten' && parts[1]) {
     const c = customers.find((x) => x.id === parts[1]) || await loadCustomer(parts[1]).catch(() => null)
     if (!c) { app.innerHTML = shell('<p>Klant niet gevonden.</p>', 'customers'); bind(); return }
     if (!customers.find((x) => x.id === c.id)) customers.push(c)
+    c.emails = emails.filter((m) => m.customer_id === c.id)
     app.innerHTML = customerView(c)
   } else if (page === 'klanten') app.innerHTML = customersView(params)
   else if (page === 'sales') app.innerHTML = salesView()
@@ -1327,6 +1544,17 @@ function bind() {
       t = setTimeout(() => {
         const f = hash().params.f || 'alle'
         go(`#/klanten?f=${f}&q=${encodeURIComponent(search.value)}`)
+      }, 200)
+    })
+  }
+  const mailSearch = app.querySelector('[data-search="mail"]')
+  if (mailSearch) {
+    let t
+    mailSearch.addEventListener('input', () => {
+      clearTimeout(t)
+      t = setTimeout(() => {
+        const f = hash().params.f || 'alle'
+        go(`#/mail?f=${f}&q=${encodeURIComponent(mailSearch.value)}`)
       }, 200)
     })
   }
