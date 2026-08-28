@@ -6,7 +6,7 @@ import {
   parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
-  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl,
+  todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl,
   requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadTimeEntries, loadTodoBuckets, loadTodoLabels, loadTodoLabelLinks, loadTodoComments, setTodoLabels, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
@@ -782,7 +782,7 @@ function todosView() {
     <div class="page-head">
       <div>
         <h1>Taken</h1>
-        <p class="lead">${openCount} open. Kolommen en labels bepaal je zelf — sleep kaarten van de ene naar de andere.</p>
+        <p class="lead">${openCount} open. Sleep kaarten tussen kolommen. Kolommen wijzig je onder Instellingen.</p>
       </div>
       <div class="row-actions">
         <button type="button" class="btn ghost small" data-open="todo-labels">Labels</button>
@@ -790,10 +790,7 @@ function todosView() {
       </div>
     </div>
     <div class="board">
-      ${columns.map(boardColumnHtml).join('') || ''}
-      <section class="board-col add-col">
-        <button type="button" class="board-add-col" data-add-bucket>+ Kolom toevoegen</button>
-      </section>
+      ${columns.map(boardColumnHtml).join('') || '<p class="muted">Nog geen kolommen. Voeg ze toe onder Instellingen.</p>'}
     </div>
   `, 'todos')
 }
@@ -806,12 +803,9 @@ function boardColumnHtml(col) {
   return `
     <section class="board-col" data-bucket="${esc(col.id)}">
       <header class="board-col-head">
-        ${col.fake
-          ? `<h3>${esc(col.name)}</h3>`
-          : `<input class="board-col-title" data-rename-bucket="${esc(col.id)}" value="${esc(col.name)}" aria-label="Kolomnaam">
-             <button type="button" class="icon-btn" data-delete-bucket="${esc(col.id)}" title="Kolom verwijderen">×</button>`}
+        <h3>${esc(col.name)}</h3>
       </header>
-      ${col.fake ? '<p class="tiny" style="padding:0 .15rem .35rem">Sleep naar een kolom of voeg er een toe.</p>' : `<button type="button" class="board-add-task" data-add-task="${esc(col.id)}">+ Taak toevoegen</button>`}
+      ${col.fake ? '<p class="tiny" style="padding:0 .15rem .35rem">Sleep naar een kolom.</p>' : `<button type="button" class="board-add-task" data-add-task="${esc(col.id)}">+ Taak toevoegen</button>`}
       <div class="board-cards" data-drop="${esc(col.id)}">
         ${open.map(taskCardHtml).join('') || (!done.length ? '<p class="board-empty">Nog geen taken</p>' : '')}
       </div>
@@ -1127,7 +1121,7 @@ function settingsView() {
     <div class="page-head">
       <div>
         <h1>Instellingen</h1>
-        <p class="lead">Account, voettekst en mailtemplates.</p>
+        <p class="lead">Account, voettekst, mailtemplates en kolommen van het takenbord.</p>
       </div>
     </div>
     <div class="stack">
@@ -1165,8 +1159,37 @@ function settingsView() {
             </div>`).join('')}</div>` : '<p class="muted">Nog geen templates. Voeg de eerste toe; ze verschijnen daarna in de mailmodule.</p>'}
         </div>
       </section>
+      ${settingsBucketsHtml()}
     </div>
   `, 'settings')
+}
+
+function settingsBucketsHtml() {
+  const todos = allBoardTodos()
+  const last = todoBuckets.length - 1
+  return `
+      <section class="section">
+        <header>
+          <h3>Kolommen</h3>
+          <button type="button" class="btn ghost small" data-add-bucket>+ Kolom toevoegen</button>
+        </header>
+        <div class="body">
+          <p class="tiny">Vaste indeling van het takenbord, in deze volgorde. Namen en volgorde kun je hier aanpassen; extra kolommen mag.</p>
+          ${todoBuckets.length ? `<div class="list" data-bucket-list>${todoBuckets.map((b, i) => {
+            const n = todos.filter((t) => t.bucket_id === b.id).length
+            return `
+            <div class="item settings-bucket">
+              <input class="settings-bucket-name" data-rename-bucket="${esc(b.id)}" value="${esc(b.name)}" aria-label="Kolomnaam" autocomplete="off">
+              <small>${n === 1 ? '1 taak' : `${n} taken`}</small>
+              <div class="actions">
+                <button type="button" class="btn ghost small" data-move-bucket="${esc(b.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''}>Omhoog</button>
+                <button type="button" class="btn ghost small" data-move-bucket="${esc(b.id)}" data-dir="1" ${i === last ? 'disabled' : ''}>Omlaag</button>
+                <button type="button" class="btn ghost small" data-delete-bucket="${esc(b.id)}">Verwijderen</button>
+              </div>
+            </div>`
+          }).join('')}</div>` : '<p class="muted">Nog geen kolommen. Voeg de eerste toe.</p><div class="list" data-bucket-list></div>'}
+        </div>
+      </section>`
 }
 
 function moneyView() {
@@ -2426,18 +2449,21 @@ function bindBoard() {
   })
   app.querySelectorAll('[data-add-bucket]').forEach((el) => {
     el.addEventListener('click', () => {
-      const col = el.closest('.add-col')
-      col.innerHTML = '<input class="board-col-title" data-new-bucket placeholder="Kolomnaam" aria-label="Kolomnaam">'
-      const input = col.querySelector('input')
+      const host = app.querySelector('[data-bucket-list]')
+      if (!host) return
+      const box = document.createElement('div')
+      box.className = 'item settings-bucket'
+      box.innerHTML = '<input class="settings-bucket-name" data-new-bucket placeholder="Kolomnaam" aria-label="Kolomnaam" autocomplete="off">'
+      host.append(box)
+      const input = box.querySelector('input')
       input.focus()
+      let saving = false
       const save = async () => {
+        if (saving) return
         const name = input.value.trim()
         if (!name) { paint(); return }
-        const row = await upsert('nh_todo_buckets', { name, position: todoBuckets.length })
-        if (!todoBuckets.length) {
-          const orphans = allBoardTodos().filter((t) => !t.bucket_id)
-          await Promise.all(orphans.map((t) => upsert('nh_todos', { bucket_id: row.id }, t.id)))
-        }
+        saving = true
+        await upsert('nh_todo_buckets', { name, position: nextBucketPosition(todoBuckets) })
         await refresh()
         paint()
       }
@@ -2454,6 +2480,16 @@ function bindBoard() {
       if (!name) { paint(); return }
       await upsert('nh_todo_buckets', { name }, el.getAttribute('data-rename-bucket'))
       await refresh()
+      paint()
+    })
+  })
+  app.querySelectorAll('[data-move-bucket]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const updates = moveBucket(todoBuckets, el.getAttribute('data-move-bucket'), el.getAttribute('data-dir'))
+      if (!updates) return
+      await Promise.all(updates.map((u) => upsert('nh_todo_buckets', { position: u.position }, u.id)))
+      await refresh()
+      paint()
     })
   })
   app.querySelectorAll('[data-delete-bucket]').forEach((el) => {
