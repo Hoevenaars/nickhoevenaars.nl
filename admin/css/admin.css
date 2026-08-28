@@ -177,8 +177,13 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 }
 .mail-msg header { align-items: baseline }
 .nav-btn .chip { margin-left: .15rem; font-size: .68rem; padding: 0 .4rem }
-.item b { display: block; font-weight: 500 }
-.item small { color: var(--muted) }
+.item.settings-bucket { cursor: default }
+.settings-bucket-name {
+  display: block; width: min(360px, 100%);
+  background: var(--paper-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: .4rem .55rem; color: inherit; font-weight: 600
+}
+.settings-bucket-name:focus { outline: 1px solid rgba(59,130,246,.4) }
 
 .stack { display: grid; gap: 1rem }
 .section { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,255,255,.02); overflow: hidden }

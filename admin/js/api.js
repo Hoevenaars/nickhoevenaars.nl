@@ -8,7 +8,7 @@ import {
 import {
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
-  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl
+  todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl
 } from '../../lib/todos.js'
 import { allocationsToSave } from '../../lib/money.js'
 
@@ -18,7 +18,7 @@ export {
   parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
-  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl
+  todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl
 }
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
