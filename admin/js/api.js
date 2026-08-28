@@ -4,6 +4,7 @@ import {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
   elapsedSeconds, formatElapsed, formatDurationNl
 } from '../../lib/time.js'
+import { allocationsToSave } from '../../lib/money.js'
 
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
@@ -264,8 +265,8 @@ export async function sendMailApi(payload) {
 export async function replaceAllocations(costId, rows) {
   const { error: delErr } = await sb.from('nh_cost_allocations').delete().eq('cost_id', costId)
   if (delErr) throw delErr
-  const clean = rows.filter((r) => r.customer_id && Number(r.amount) > 0)
-    .map((r) => ({ cost_id: costId, customer_id: r.customer_id, amount: Number(r.amount) }))
+  const clean = allocationsToSave(rows)
+    .map((r) => ({ cost_id: costId, customer_id: r.customer_id, amount: r.amount }))
   if (!clean.length) return []
   const { data, error } = await sb.from('nh_cost_allocations').insert(clean).select()
   if (error) throw error

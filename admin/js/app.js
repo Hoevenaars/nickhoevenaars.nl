@@ -7,6 +7,7 @@ import {
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
+import { resolveAllocations } from '../../lib/money.js'
 
 const app = document.getElementById('app')
 let session = null
@@ -1330,7 +1331,7 @@ function bindAllocUi(root) {
   root.querySelector('[data-split-alloc]')?.addEventListener('click', () => {
     const total = Number(root.querySelector('[name="amount"]')?.value || 0)
     const rows = [...box.querySelectorAll('.alloc-row')].filter((r) => r.querySelector('[name="alloc_customer"]').value)
-    if (!rows.length || !total) return
+    if (!rows.length) return
     const each = Math.round((total / rows.length) * 100) / 100
     rows.forEach((r, i) => {
       r.querySelector('[name="alloc_amount"]').value = i === rows.length - 1
@@ -1445,7 +1446,7 @@ function showModal(kind, payload = {}) {
       <div class="field full"><label>Notities</label><textarea name="notes">${esc(existing?.notes || '')}</textarea></div>
       <div class="field full">
         <label>Verdeling over klanten</label>
-        <p class="tiny">Leeg = niet gekoppeld. Bedragen mag je uitsmeren; rest blijft los.</p>
+        <p class="tiny">Leeg klantveld = niet gekoppeld. 0 euro mag (coulance). Leeg bedrag verdeelt de rest.</p>
         <div data-allocs>${(existing?.allocations?.length ? existing.allocations : [{ customer_id: customerId || '', amount: '' }]).map(allocRowHtml).join('')}</div>
         <div class="actions">
           <button type="button" class="btn ghost small" data-add-alloc>Klant toevoegen</button>
@@ -1561,22 +1562,8 @@ function readAllocations(form) {
   const rows = [...form.querySelectorAll('.alloc-row')].map((r) => ({
     customer_id: r.querySelector('[name="alloc_customer"]').value || null,
     amount: r.querySelector('[name="alloc_amount"]').value
-  })).filter((r) => r.customer_id)
-  const withAmt = rows.filter((r) => Number(r.amount) > 0)
-  const without = rows.filter((r) => !(Number(r.amount) > 0))
-  if (!rows.length) return []
-  if (without.length && !withAmt.length) {
-    const each = Math.round((total / without.length) * 100) / 100
-    return without.map((r, i) => ({
-      customer_id: r.customer_id,
-      amount: i === without.length - 1 ? Math.round((total - each * (without.length - 1)) * 100) / 100 : each
-    }))
-  }
-  if (without.length === 1) {
-    const used = withAmt.reduce((s, r) => s + Number(r.amount), 0)
-    return [...withAmt, { customer_id: without[0].customer_id, amount: Math.max(0, total - used) }]
-  }
-  return withAmt
+  }))
+  return resolveAllocations(rows, total)
 }
 
 const claimedMailSends = new Set()
