@@ -194,6 +194,7 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 
 .form { display: grid; gap: .7rem }
 .form.two { grid-template-columns: 1fr 1fr }
+.form > input[type="hidden"] { display: none }
 .field { display: flex; flex-direction: column; gap: .3rem }
 .field.full { grid-column: 1 / -1 }
 .field label { font-size: .78rem; color: var(--muted) }
@@ -357,6 +358,20 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
 .btn.time-go { width: 100%; min-height: 52px; font-size: 1.05rem; margin-top: .2rem }
 .btn.time-go.stop { background: linear-gradient(135deg, #7f1d1d, #dc2626) }
 .time-start-form .field label { margin-bottom: .15rem }
+.btn.time-manual { width: 100%; min-height: 44px }
+.time-or {
+  text-align: center;
+  color: var(--muted);
+  font-size: .8rem;
+  margin: .55rem 0 .35rem
+}
+.time-duration {
+  display: flex; align-items: center; gap: .45rem; flex-wrap: wrap
+}
+.time-duration input {
+  width: 4.8rem
+}
+.time-run .form.two { text-align: left }
 
 @media (max-width: 860px) {
   .shell { flex-direction: column }

@@ -2,12 +2,14 @@ import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 import {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
-  elapsedSeconds, formatElapsed, formatDurationNl
+  elapsedSeconds, formatElapsed, formatDurationNl,
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange
 } from '../../lib/time.js'
 
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
-  elapsedSeconds, formatElapsed, formatDurationNl
+  elapsedSeconds, formatElapsed, formatDurationNl,
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange
 }
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
