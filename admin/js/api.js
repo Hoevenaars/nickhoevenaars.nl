@@ -5,11 +5,20 @@ import {
   elapsedSeconds, formatElapsed, formatDurationNl,
   parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange
 } from '../../lib/time.js'
+import {
+  TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
+  checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
+  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl
+} from '../../lib/todos.js'
+import { allocationsToSave } from '../../lib/money.js'
 
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
   elapsedSeconds, formatElapsed, formatDurationNl,
-  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
+  TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
+  checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
+  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl
 }
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -208,6 +217,53 @@ export async function loadLooseTodos() {
   return data || []
 }
 
+export async function loadTodoBuckets() {
+  const { data, error } = await sb.from('nh_todo_buckets').select('*').order('position')
+  if (error) {
+    console.warn('nh_todo_buckets:', error.message)
+    return []
+  }
+  return data || []
+}
+
+export async function loadTodoLabels() {
+  const { data, error } = await sb.from('nh_todo_labels').select('*').order('created_at')
+  if (error) {
+    console.warn('nh_todo_labels:', error.message)
+    return []
+  }
+  return data || []
+}
+
+export async function loadTodoLabelLinks() {
+  const { data, error } = await sb.from('nh_todo_label_links').select('*')
+  if (error) {
+    console.warn('nh_todo_label_links:', error.message)
+    return []
+  }
+  return data || []
+}
+
+export async function loadTodoComments(todoId) {
+  const { data, error } = await sb
+    .from('nh_todo_comments')
+    .select('*')
+    .eq('todo_id', todoId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+export async function setTodoLabels(todoId, labelIds) {
+  const { error: delErr } = await sb.from('nh_todo_label_links').delete().eq('todo_id', todoId)
+  if (delErr) throw delErr
+  const rows = [...new Set(labelIds.filter(Boolean))].map((label_id) => ({ todo_id: todoId, label_id }))
+  if (!rows.length) return []
+  const { data, error } = await sb.from('nh_todo_label_links').insert(rows).select()
+  if (error) throw error
+  return data
+}
+
 export async function loadMailTemplates() {
   const { data, error } = await sb
     .from('nh_mail_templates')
@@ -266,8 +322,8 @@ export async function sendMailApi(payload) {
 export async function replaceAllocations(costId, rows) {
   const { error: delErr } = await sb.from('nh_cost_allocations').delete().eq('cost_id', costId)
   if (delErr) throw delErr
-  const clean = rows.filter((r) => r.customer_id && Number(r.amount) > 0)
-    .map((r) => ({ cost_id: costId, customer_id: r.customer_id, amount: Number(r.amount) }))
+  const clean = allocationsToSave(rows)
+    .map((r) => ({ cost_id: costId, customer_id: r.customer_id, amount: r.amount }))
   if (!clean.length) return []
   const { data, error } = await sb.from('nh_cost_allocations').insert(clean).select()
   if (error) throw error

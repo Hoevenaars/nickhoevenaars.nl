@@ -4,10 +4,14 @@ import {
   phaseLabel, typeLabel, statusLabel, shiftPhase,
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType, elapsedSeconds, formatElapsed, formatDurationNl,
   parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
-  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadTimeEntries, sendMailApi, replaceAllocations,
+  TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
+  checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
+  todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl,
+  requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadTimeEntries, loadTodoBuckets, loadTodoLabels, loadTodoLabelLinks, loadTodoComments, setTodoLabels, sendMailApi, replaceAllocations,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
+import { resolveAllocations } from '../../lib/money.js'
 
 const app = document.getElementById('app')
 let session = null
@@ -18,6 +22,11 @@ let looseTodos = []
 let emails = []
 let mailTemplates = []
 let timeEntries = []
+let todoBuckets = []
+let todoLabels = []
+let todoLabelLinks = []
+let expandedDone = new Set()
+let openTaskId = null
 let notice = ''
 let timerTick = null
 
@@ -152,14 +161,32 @@ function findLog(id) {
   }
   return null
 }
+function labelIdsFor(todoId) {
+  return todoLabelLinks.filter((l) => l.todo_id === todoId).map((l) => l.label_id)
+}
+
 function findTodo(id) {
   const loose = (looseTodos || []).find((t) => t.id === id)
-  if (loose) return { ...loose, cid: null, company: 'Persoonlijk' }
+  if (loose) return { ...loose, cid: null, company: 'Persoonlijk', label_ids: labelIdsFor(loose.id) }
   for (const c of customers) {
     const t = (c.todos || []).find((x) => x.id === id)
-    if (t) return { ...t, cid: c.id, company: c.company_name }
+    if (t) return { ...t, cid: c.id, company: c.company_name, label_ids: labelIdsFor(t.id) }
   }
   return null
+}
+
+function allBoardTodos() {
+  const attach = (t, company, cid) => ({
+    ...t,
+    company,
+    cid,
+    label_ids: labelIdsFor(t.id),
+    checklist: Array.isArray(t.checklist) ? t.checklist : []
+  })
+  return [
+    ...customers.flatMap((c) => (c.todos || []).map((t) => attach(t, c.company_name, c.id))),
+    ...looseTodos.map((t) => attach(t, 'Persoonlijk', null))
+  ]
 }
 function hash() {
   const raw = (location.hash || '#/dashboard').replace(/^#/, '')
@@ -264,8 +291,9 @@ function companyForMail(m) {
 }
 
 async function refresh() {
-  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates, timeEntries] = await Promise.all([
-    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates(), loadTimeEntries()
+  ;[customers, costs, looseRevenues, looseTodos, emails, mailTemplates, timeEntries, todoBuckets, todoLabels, todoLabelLinks] = await Promise.all([
+    loadCustomers(), loadCosts(), loadLooseRevenues(), loadLooseTodos(), loadEmails(), loadMailTemplates(), loadTimeEntries(),
+    loadTodoBuckets(), loadTodoLabels(), loadTodoLabelLinks()
   ])
   attachEmails()
 }
@@ -530,7 +558,7 @@ function shell(content, active) {
         <button class="btn ghost small" data-action="logout">Uitloggen</button>
       </div>
     </aside>
-    <main class="main">
+    <main class="main${active === 'todos' ? ' board-page' : ''}">
       ${notice ? `<p class="tiny" style="color:#6ee7b7;margin-bottom:.8rem">${esc(notice)}</p>` : ''}
       ${content}
     </main>`
@@ -744,44 +772,354 @@ function salesView() {
 }
 
 function todosView() {
-  const open = [
-    ...customers.flatMap((c) => c.openTodos.map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
-    ...looseTodos.filter((t) => t.status === 'open').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
-  ].sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999') || (a.priority === 'hoog' ? -1 : 1))
-  const done = [
-    ...customers.flatMap((c) => c.todos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: c.company_name, cid: c.id }))),
-    ...looseTodos.filter((t) => t.status === 'done').map((t) => ({ ...t, company: 'Persoonlijk', cid: null }))
-  ].sort((a, b) => new Date(b.completed_at || b.created_at) - new Date(a.completed_at || a.created_at)).slice(0, 8)
-
+  const todos = allBoardTodos()
+  const openCount = todos.filter((t) => t.status !== 'done').length
+  const { grouped, unassigned } = todosByBucket(todos, todoBuckets)
+  const columns = []
+  if (unassigned.length) columns.push({ id: '', name: 'Niet ingedeeld', fake: true, todos: unassigned })
+  for (const b of todoBuckets) columns.push({ id: b.id, name: b.name, fake: false, todos: grouped.get(b.id) || [] })
   return shell(`
     <div class="page-head">
       <div>
         <h1>Taken</h1>
-        <p class="lead">${open.length} open. Mag ook zonder klant.</p>
+        <p class="lead">${openCount} open. Kolommen en labels bepaal je zelf — sleep kaarten van de ene naar de andere.</p>
       </div>
-      ${plusBar()}
+      <div class="row-actions">
+        <button type="button" class="btn ghost small" data-open="todo-labels">Labels</button>
+        ${plusBar()}
+      </div>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Taak</th><th>Klant</th><th>Deadline</th><th>Prio</th><th></th></tr></thead>
-        <tbody>
-          ${open.map((t) => `
-            <tr ${t.cid ? `data-go="#/klanten/${t.cid}?tab=werk"` : ''}>
-              <td><b>${esc(t.title)}</b>${t.note ? `<div class="tiny">${esc(t.note)}</div>` : ''}</td>
-              <td>${esc(t.company)}</td>
-              <td>${fmtDate(t.due_at)}</td>
-              <td><span class="chip ${prioChip(t.priority)}">${esc(t.priority)}</span></td>
-              <td data-stop="1">
-                <button class="btn ghost small" data-open="todo" data-record="${t.id}" ${t.cid ? `data-customer="${t.cid}"` : ''}>Bewerken</button>
-                <button class="btn ghost small" data-done="${t.id}">Afronden</button>
-              </td>
-            </tr>`).join('') || `<tr><td colspan="5" class="muted">Geen open taken.</td></tr>`}
-        </tbody>
-      </table>
+    <div class="board">
+      ${columns.map(boardColumnHtml).join('') || ''}
+      <section class="board-col add-col">
+        <button type="button" class="board-add-col" data-add-bucket>+ Kolom toevoegen</button>
+      </section>
     </div>
-    ${done.length ? `<h3 style="margin:1.2rem 0 .5rem">Recent afgerond</h3>
-    <div class="list">${done.map((t) => itemLink(t.cid, t.title, `${t.company} · ${fmtDate(t.completed_at || t.created_at)}`)).join('')}</div>` : ''}
   `, 'todos')
+}
+
+function boardColumnHtml(col) {
+  const open = col.todos.filter((t) => t.status !== 'done')
+  const done = col.todos.filter((t) => t.status === 'done')
+  const key = col.id || '__none__'
+  const showDone = expandedDone.has(key)
+  return `
+    <section class="board-col" data-bucket="${esc(col.id)}">
+      <header class="board-col-head">
+        ${col.fake
+          ? `<h3>${esc(col.name)}</h3>`
+          : `<input class="board-col-title" data-rename-bucket="${esc(col.id)}" value="${esc(col.name)}" aria-label="Kolomnaam">
+             <button type="button" class="icon-btn" data-delete-bucket="${esc(col.id)}" title="Kolom verwijderen">×</button>`}
+      </header>
+      ${col.fake ? '<p class="tiny" style="padding:0 .15rem .35rem">Sleep naar een kolom of voeg er een toe.</p>' : `<button type="button" class="board-add-task" data-add-task="${esc(col.id)}">+ Taak toevoegen</button>`}
+      <div class="board-cards" data-drop="${esc(col.id)}">
+        ${open.map(taskCardHtml).join('') || (!done.length ? '<p class="board-empty">Nog geen taken</p>' : '')}
+      </div>
+      ${done.length ? `
+        <button type="button" class="board-done-toggle" data-toggle-done="${esc(key)}">Voltooide taken ${done.length}</button>
+        ${showDone ? `<div class="board-cards is-done" data-drop="${esc(col.id)}">${done.map(taskCardHtml).join('')}</div>` : ''}
+      ` : ''}
+    </section>`
+}
+
+function taskCardHtml(t) {
+  const labels = (t.label_ids || []).map((id) => todoLabels.find((l) => l.id === id)).filter(Boolean)
+  const stats = checklistStats(t.checklist)
+  const due = formatDueShort(t.due_at)
+  const overdue = isOverdue(t.due_at, t.status, isoDate())
+  return `
+    <article class="task-card ${t.status === 'done' ? 'is-done' : ''}" draggable="true" data-card="${esc(t.id)}">
+      ${labels.length ? `<div class="task-labels">${labels.map((l) => {
+        const c = labelColor(l.color)
+        return `<span class="task-label" style="background:${c.bg};color:${c.fg}">${esc(l.name)}</span>`
+      }).join('')}</div>` : ''}
+      <div class="task-title-row">
+        <button type="button" class="task-check ${t.status === 'done' ? 'on' : ''}" data-toggle-todo="${esc(t.id)}" aria-label="${t.status === 'done' ? 'Heropenen' : 'Afronden'}"></button>
+        <button type="button" class="task-open" data-open-task="${esc(t.id)}">${esc(t.title)}</button>
+      </div>
+      <div class="task-meta">
+        ${due ? `<span class="task-due ${overdue ? 'overdue' : ''}">${esc(due)}</span>` : ''}
+        ${stats.total ? `<span class="task-checks">${stats.done}/${stats.total}</span>` : ''}
+        ${t.cid ? `<span class="task-company">${esc(t.company)}</span>` : ''}
+      </div>
+    </article>`
+}
+
+function closeTaskPanel() {
+  document.getElementById('task-panel')?.remove()
+  document.body.classList.remove('modal-open')
+  openTaskId = null
+}
+
+async function openTaskPanel(id, extras = {}) {
+  closeTaskPanel()
+  let todo = id ? findTodo(id) : {
+    id: '',
+    title: '',
+    customer_id: extras.customerId || null,
+    bucket_id: extras.bucketId || todoBuckets[0]?.id || null,
+    progress: 'niet_gestart',
+    status: 'open',
+    priority: 'normaal',
+    start_at: '',
+    due_at: '',
+    note: '',
+    checklist: [],
+    label_ids: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+  if (id && !todo) return
+  openTaskId = todo.id || null
+  const comments = todo.id ? await loadTodoComments(todo.id).catch(() => []) : []
+  const wrap = document.createElement('div')
+  wrap.id = 'task-panel'
+  wrap.innerHTML = taskPanelHtml(todo, comments)
+  document.body.classList.add('modal-open')
+  document.body.appendChild(wrap)
+  bindTaskPanel(wrap, todo)
+}
+
+function taskPanelHtml(todo, comments) {
+  const assigned = new Set(todo.label_ids || [])
+  const stats = checklistStats(todo.checklist)
+  const done = todo.status === 'done' || todo.progress === 'voltooid'
+  return `
+    <div class="modal-back task-back">
+      <div class="task-panel">
+        <div class="task-panel-main">
+          <div class="task-panel-top">
+            <span class="tiny">Takenbord</span>
+            <button type="button" class="icon-btn" data-close-task title="Sluiten">×</button>
+          </div>
+          <div class="task-title-row lg">
+            <button type="button" class="task-check ${done ? 'on' : ''}" data-toggle-todo="${esc(todo.id || '')}" aria-label="Afronden"></button>
+            <input class="task-title-input" data-patch="title" value="${esc(todo.title)}" placeholder="Taaknaam">
+          </div>
+          <p class="tiny task-when">${todo.id ? `Gemaakt ${esc(relativeTimeNl(todo.created_at))}${todo.updated_at && todo.updated_at !== todo.created_at ? ' · gewijzigd ' + esc(relativeTimeNl(todo.updated_at)) : ''}` : 'Nieuwe taak, wordt opgeslagen zodra je een naam invult.'}</p>
+          <div class="task-label-row">
+            ${todoLabels.length ? todoLabels.map((l) => {
+              const c = labelColor(l.color)
+              const on = assigned.has(l.id)
+              return `<button type="button" class="task-label ${on ? 'on' : ''}" data-toggle-label="${esc(l.id)}" style="background:${c.bg};color:${c.fg}">${esc(l.name)}</button>`
+            }).join('') : '<span class="tiny">Nog geen labels. Voeg ze toe via Labels op het bord.</span>'}
+          </div>
+          <div class="task-grid">
+            <div class="field"><label>Status</label>
+              <select data-patch="progress">${options(TODO_PROGRESS, todo.progress || (done ? 'voltooid' : 'niet_gestart'))}</select>
+            </div>
+            <div class="field"><label>Prioriteit</label>
+              <select data-patch="priority">${options(TODO_PRIORITIES, todo.priority || 'normaal')}</select>
+            </div>
+            <div class="field"><label>Begindatum</label>
+              <input type="date" data-patch="start_at" value="${esc(todo.start_at || '')}">
+            </div>
+            <div class="field"><label>Einddatum</label>
+              <input type="date" data-patch="due_at" value="${esc(todo.due_at || '')}">
+            </div>
+            <div class="field"><label>Kolom</label>
+              <select data-patch="bucket_id">
+                <option value="">Niet ingedeeld</option>
+                ${todoBuckets.map((b) => `<option value="${esc(b.id)}" ${b.id === todo.bucket_id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Klant</label>
+              <select data-patch="customer_id">
+                <option value="">Persoonlijk</option>
+                ${customers.map((c) => `<option value="${esc(c.id)}" ${c.id === todo.customer_id ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-top:1rem">
+            <label>Controlelijst${stats.total ? ` · ${stats.done}/${stats.total}` : ''}</label>
+            <div class="checklist" data-checklist>
+              ${(todo.checklist || []).map((item) => `
+                <label class="check-row">
+                  <input type="checkbox" data-check-item="${esc(item.id)}" ${item.done ? 'checked' : ''}>
+                  <input class="check-text" data-check-title="${esc(item.id)}" value="${esc(item.title)}">
+                  <button type="button" class="icon-btn" data-del-check="${esc(item.id)}" title="Stap verwijderen">×</button>
+                </label>`).join('')}
+              <input class="check-add" data-add-check placeholder="Voeg stappen toe om deze taak te voltooien…">
+            </div>
+          </div>
+          <div class="field" style="margin-top:.8rem">
+            <label>Notities</label>
+            <textarea data-patch="note" rows="5" placeholder="Typ een beschrijving of voeg hier notities toe.">${esc(todo.note || '')}</textarea>
+          </div>
+          ${todo.id ? `<p class="tiny" style="margin-top:1rem"><button type="button" class="btn danger small" data-delete-todo="${esc(todo.id)}">Taak verwijderen</button></p>` : ''}
+        </div>
+        <aside class="task-chat">
+          <h3>Taakchat</h3>
+          <div class="task-chat-list">
+            ${comments.length ? comments.map((m) => `
+              <div class="task-bubble">
+                <p>${esc(m.body)}</p>
+                <time>${esc(relativeTimeNl(m.created_at))}</time>
+              </div>`).join('') : '<p class="tiny">Nog geen berichten. Handig voor een korte aantekening bij de taak.</p>'}
+          </div>
+          <form class="task-chat-form" data-form="todo-comment">
+            <input type="hidden" name="todo_id" value="${esc(todo.id || '')}">
+            <input name="body" ${todo.id ? '' : 'disabled '}placeholder="Typ een bericht" autocomplete="off">
+            <button class="btn small" type="submit" ${todo.id ? '' : 'disabled'}>Stuur</button>
+          </form>
+        </aside>
+      </div>
+    </div>`
+}
+
+async function ensureTodo(wrap, titleHint) {
+  if (openTaskId) return openTaskId
+  const title = (titleHint || wrap.querySelector('[data-patch="title"]')?.value || '').trim()
+  if (!title) return null
+  const bucketId = wrap.querySelector('[data-patch="bucket_id"]')?.value || null
+  const customerId = wrap.querySelector('[data-patch="customer_id"]')?.value || null
+  const peers = allBoardTodos().filter((t) => (t.bucket_id || '') === (bucketId || ''))
+  const row = await upsert('nh_todos', {
+    title,
+    bucket_id: bucketId || null,
+    customer_id: customerId || null,
+    status: 'open',
+    progress: 'niet_gestart',
+    priority: wrap.querySelector('[data-patch="priority"]')?.value || 'normaal',
+    start_at: wrap.querySelector('[data-patch="start_at"]')?.value || null,
+    due_at: wrap.querySelector('[data-patch="due_at"]')?.value || null,
+    note: wrap.querySelector('[data-patch="note"]')?.value || null,
+    checklist: [],
+    sort_order: nextSortOrder(peers)
+  })
+  openTaskId = row.id
+  const chatId = wrap.querySelector('[name="todo_id"]')
+  if (chatId) chatId.value = row.id
+  wrap.querySelectorAll('[data-toggle-todo]').forEach((el) => el.setAttribute('data-toggle-todo', row.id))
+  wrap.querySelector('[data-form="todo-comment"] input[name="body"]')?.removeAttribute('disabled')
+  wrap.querySelector('[data-form="todo-comment"] button')?.removeAttribute('disabled')
+  await refresh()
+  return row.id
+}
+
+function bindTaskPanel(wrap, todo) {
+  wrap.querySelector('[data-close-task]')?.addEventListener('click', async () => {
+    closeTaskPanel()
+    await refresh()
+    paint()
+  })
+  wrap.querySelector('.task-back')?.addEventListener('click', async (e) => {
+    if (e.target.classList.contains('task-back')) {
+      closeTaskPanel()
+      await refresh()
+      paint()
+    }
+  })
+  wrap.querySelectorAll('[data-patch]').forEach((el) => {
+    el.addEventListener('change', async () => {
+      try {
+        const field = el.getAttribute('data-patch')
+        const raw = el.type === 'checkbox' ? el.checked : el.value
+        const value = raw === '' ? null : raw
+        const id = await ensureTodo(wrap, field === 'title' ? value : '')
+        if (!id) return
+        let payload = { [field]: value }
+        if (field === 'progress') payload = fieldsForProgress(value)
+        if (field === 'title' && !String(value || '').trim()) return
+        await upsert('nh_todos', payload, id)
+        if (field === 'progress') {
+          const check = wrap.querySelector('.task-check')
+          if (check) check.classList.toggle('on', value === 'voltooid')
+        }
+      } catch (err) { alert(err.message || String(err)) }
+    })
+  })
+  wrap.querySelectorAll('[data-toggle-label]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      try {
+        const id = await ensureTodo(wrap)
+        if (!id) { alert('Vul eerst een taaknaam in.'); return }
+        const labelId = el.getAttribute('data-toggle-label')
+        const t = findTodo(id) || todo
+        const next = new Set(t.label_ids || [])
+        if (next.has(labelId)) next.delete(labelId)
+        else next.add(labelId)
+        await setTodoLabels(id, [...next])
+        el.classList.toggle('on')
+        todoLabelLinks = await loadTodoLabelLinks()
+      } catch (err) { alert(err.message || String(err)) }
+    })
+  })
+  wrap.querySelector('[data-add-check]')?.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const title = e.target.value.trim()
+    if (!title) return
+    try {
+      const id = await ensureTodo(wrap)
+      if (!id) { alert('Vul eerst een taaknaam in.'); return }
+      const t = findTodo(id)
+      const checklist = [...(t?.checklist || []), newChecklistItem(title)]
+      await upsert('nh_todos', { checklist }, id)
+      e.target.value = ''
+      await refresh()
+      openTaskPanel(id)
+    } catch (err) { alert(err.message || String(err)) }
+  })
+  wrap.querySelectorAll('[data-check-item]').forEach((el) => {
+    el.addEventListener('change', async () => {
+      const id = openTaskId
+      if (!id) return
+      const t = findTodo(id)
+      const checklist = (t?.checklist || []).map((item) => item.id === el.getAttribute('data-check-item') ? { ...item, done: el.checked } : item)
+      await upsert('nh_todos', { checklist }, id)
+      await refresh()
+    })
+  })
+  wrap.querySelectorAll('[data-check-title]').forEach((el) => {
+    el.addEventListener('change', async () => {
+      const id = openTaskId
+      if (!id) return
+      const t = findTodo(id)
+      const checklist = (t?.checklist || []).map((item) => item.id === el.getAttribute('data-check-title') ? { ...item, title: el.value } : item)
+      await upsert('nh_todos', { checklist }, id)
+      await refresh()
+    })
+  })
+  wrap.querySelectorAll('[data-del-check]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const id = openTaskId
+      if (!id) return
+      const t = findTodo(id)
+      const checklist = (t?.checklist || []).filter((item) => item.id !== el.getAttribute('data-del-check'))
+      await upsert('nh_todos', { checklist }, id)
+      await refresh()
+      openTaskPanel(id)
+    })
+  })
+  wrap.querySelector('[data-delete-todo]')?.addEventListener('click', async () => {
+    if (!confirm('Deze taak verwijderen?')) return
+    await remove('nh_todos', wrap.querySelector('[data-delete-todo]').getAttribute('data-delete-todo'))
+    closeTaskPanel()
+    await refresh()
+    paint()
+    flash('Taak verwijderd')
+  })
+  wrap.querySelector('[data-toggle-todo]')?.addEventListener('click', async (e) => {
+    e.preventDefault()
+    const id = await ensureTodo(wrap)
+    if (!id) return
+    const t = findTodo(id)
+    const done = t?.status !== 'done'
+    await upsert('nh_todos', fieldsForDone(done), id)
+    await refresh()
+    openTaskPanel(id)
+  })
+  wrap.querySelector('form[data-form="todo-comment"]')?.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const form = e.target
+    const body = String(new FormData(form).get('body') || '').trim()
+    const id = openTaskId || form.querySelector('[name="todo_id"]').value
+    if (!body || !id) return
+    await upsert('nh_todo_comments', { todo_id: id, body })
+    form.querySelector('[name="body"]').value = ''
+    await openTaskPanel(id)
+  })
 }
 
 function settingsView() {
@@ -979,7 +1317,7 @@ function logBar(c) {
 
 function customerTabs(c, tab) {
   const unread = (c.emails || []).filter((m) => m.direction === 'in' && !m.read_at).length
-  const tabs = [['werk', 'Werk'], ['mail', unread ? `Mail (${unread})` : 'Mail'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Geld']]
+  const tabs = [['werk', 'Werk'], ['mail', unread ? `Mail (${unread})` : 'Mail'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Finance']]
   return `<div class="tabs">${tabs.map(([id, label]) =>
     `<button type="button" class="tab ${tab === id ? 'active' : ''}" data-go="#/klanten/${c.id}?tab=${id}">${label}</button>`
   ).join('')}</div>`
@@ -1384,7 +1722,7 @@ function bindAllocUi(root) {
   root.querySelector('[data-split-alloc]')?.addEventListener('click', () => {
     const total = Number(root.querySelector('[name="amount"]')?.value || 0)
     const rows = [...box.querySelectorAll('.alloc-row')].filter((r) => r.querySelector('[name="alloc_customer"]').value)
-    if (!rows.length || !total) return
+    if (!rows.length) return
     const each = Math.round((total / rows.length) * 100) / 100
     rows.forEach((r, i) => {
       r.querySelector('[name="alloc_amount"]').value = i === rows.length - 1
@@ -1530,16 +1868,23 @@ function showModal(kind, payload = {}) {
     <div class="field"><label>E-mail</label><input name="email" type="email"></div>
     <div class="field"><label>Telefoon</label><input name="phone"></div>
     <div class="field full"><label class="check"><input type="checkbox" name="is_primary" value="1"> Primair contact</label></div>`, 'contact')
-  if (kind === 'todo') wrap.innerHTML = modalHtml(existingTodo ? 'Taak bewerken' : 'Taak', `
-    <input type="hidden" name="id" value="${esc(existingTodo?.id || '')}">
-    ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(existingTodo?.cid || customerId, { required: false, allowNone: true })}
-    <div class="field full"><label>Omschrijving</label><input name="title" required value="${esc(existingTodo?.title || '')}"></div>
-    <div class="field"><label>Deadline</label><input type="date" name="due_at" value="${esc(existingTodo?.due_at || '')}"></div>
-    <div class="field"><label>Prioriteit</label><select name="priority">${options([{ id: 'laag', label: 'Laag' }, { id: 'normaal', label: 'Normaal' }, { id: 'hoog', label: 'Hoog' }], existingTodo?.priority || 'normaal')}</select></div>
-    <div class="field full"><label>Notitie</label><textarea name="note">${esc(existingTodo?.note || '')}</textarea></div>
-    ${existingTodo ? '' : `<div class="field"><label>Reminder</label>
-      <select name="remind"><option value="">Geen</option><option value="due">Op deadline</option><option value="1">Morgen</option><option value="7">Over 7 dagen</option></select>
-    </div>`}`, 'todo')
+  if (kind === 'todo-labels') wrap.innerHTML = modalHtml('Labels', `
+    <p class="tiny full">Categorieën op de kaarten. Maak ze hier, koppel ze daarna in een taak.</p>
+    ${todoLabels.length ? `<div class="field full"><div class="label-manage">${todoLabels.map((l) => {
+      const col = labelColor(l.color)
+      return `<div class="label-manage-row">
+        <span class="task-label" style="background:${col.bg};color:${col.fg}">${esc(l.name)}</span>
+        <button type="button" class="btn ghost small" data-delete="nh_todo_labels" data-id="${esc(l.id)}">Verwijderen</button>
+      </div>`
+    }).join('')}</div></div>` : '<p class="muted full">Nog geen labels.</p>'}
+    <div class="field full"><label>Nieuw label</label><input name="name" required placeholder="Bijv. Kantoor"></div>
+    <div class="field full"><label>Kleur</label>
+      <div class="label-swatches">${TODO_LABEL_COLORS.map((col, i) => `
+        <label class="swatch" style="background:${col.bg}" title="${esc(col.id)}">
+          <input type="radio" name="color" value="${esc(col.id)}" ${i === 0 ? 'checked' : ''}>
+        </label>`).join('')}
+    </div></div>
+  `, 'todo-label', 'Toevoegen')
   if (kind === 'idea') wrap.innerHTML = modalHtml('Idee', `
     <input type="hidden" name="customer_id" value="${esc(customerId)}">
     <div class="field full"><label>Idee</label><input name="title" required></div>
@@ -1612,7 +1957,7 @@ function showModal(kind, payload = {}) {
       <div class="field full"><label>Notities</label><textarea name="notes">${esc(existing?.notes || '')}</textarea></div>
       <div class="field full">
         <label>Verdeling over klanten</label>
-        <p class="tiny">Leeg = niet gekoppeld. Bedragen mag je uitsmeren; rest blijft los.</p>
+        <p class="tiny">Leeg klantveld = niet gekoppeld. 0 euro mag (coulance). Leeg bedrag verdeelt de rest.</p>
         <div data-allocs>${(existing?.allocations?.length ? existing.allocations : [{ customer_id: customerId || '', amount: '' }]).map(allocRowHtml).join('')}</div>
         <div class="actions">
           <button type="button" class="btn ghost small" data-add-alloc>Klant toevoegen</button>
@@ -1693,6 +2038,18 @@ function showModal(kind, payload = {}) {
   wrap.querySelectorAll('[data-delete-time]').forEach((el) => {
     el.addEventListener('click', (e) => onDeleteTimeEntry(e, wrap))
   })
+  wrap.querySelectorAll('[data-delete]').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!confirm('Zeker weten verwijderen?')) return
+      await remove(el.getAttribute('data-delete'), el.getAttribute('data-id'))
+      closeModal(wrap)
+      await refresh()
+      if (kind === 'todo-labels') showModal('todo-labels')
+      else flash('Verwijderd')
+    })
+  })
   if (kind === 'mail') wrap.querySelector('textarea[name="text"]')?.setSelectionRange(0, 0)
 }
 
@@ -1743,22 +2100,8 @@ function readAllocations(form) {
   const rows = [...form.querySelectorAll('.alloc-row')].map((r) => ({
     customer_id: r.querySelector('[name="alloc_customer"]').value || null,
     amount: r.querySelector('[name="alloc_amount"]').value
-  })).filter((r) => r.customer_id)
-  const withAmt = rows.filter((r) => Number(r.amount) > 0)
-  const without = rows.filter((r) => !(Number(r.amount) > 0))
-  if (!rows.length) return []
-  if (without.length && !withAmt.length) {
-    const each = Math.round((total / without.length) * 100) / 100
-    return without.map((r, i) => ({
-      customer_id: r.customer_id,
-      amount: i === without.length - 1 ? Math.round((total - each * (without.length - 1)) * 100) / 100 : each
-    }))
-  }
-  if (without.length === 1) {
-    const used = withAmt.reduce((s, r) => s + Number(r.amount), 0)
-    return [...withAmt, { customer_id: without[0].customer_id, amount: Math.max(0, total - used) }]
-  }
-  return withAmt
+  }))
+  return resolveAllocations(rows, total)
 }
 
 const claimedMailSends = new Set()
@@ -1860,16 +2203,12 @@ async function onSubmit(e, modal) {
       delete v.id
       await upsert('nh_contacts', { customer_id: v.customer_id, name: v.name, role: v.role, email: v.email, phone: v.phone, is_primary: !!v.is_primary }, id)
     }
-    if (kind === 'todo') {
-      const id = v.id
-      delete v.id
-      const payload = {
-        customer_id: v.customer_id, title: v.title, due_at: v.due_at,
-        priority: v.priority || 'normaal', note: v.note
-      }
-      if (!id) payload.status = 'open'
-      const row = await upsert('nh_todos', payload, id)
-      if (!id) await maybeReminder(v.customer_id, v.title, v.remind, v.due_at, 'todo', row.id)
+    if (kind === 'todo-label') {
+      await upsert('nh_todo_labels', { name: v.name, color: v.color || 'pink' })
+      await refresh()
+      closeModal(modal)
+      showModal('todo-labels')
+      return
     }
     if (kind === 'idea') await upsert('nh_ideas', { customer_id: v.customer_id, title: v.title, body: v.body })
     if (kind === 'opp') {
@@ -2019,6 +2358,151 @@ async function paint() {
   bind()
 }
 
+function bindBoard() {
+  const board = app.querySelector('.board')
+  if (!board) return
+  let dragId = null
+  let skipCardClick = false
+
+  app.querySelectorAll('[data-open-task]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (skipCardClick) return
+      openTaskPanel(el.getAttribute('data-open-task'))
+    })
+  })
+  app.querySelectorAll('[data-toggle-todo]').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const id = el.getAttribute('data-toggle-todo')
+      const t = findTodo(id)
+      if (!t) return
+      await upsert('nh_todos', fieldsForDone(t.status !== 'done'), id)
+      await refresh()
+      paint()
+    })
+  })
+  app.querySelectorAll('[data-toggle-done]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const key = el.getAttribute('data-toggle-done')
+      if (expandedDone.has(key)) expandedDone.delete(key)
+      else expandedDone.add(key)
+      paint()
+    })
+  })
+  app.querySelectorAll('[data-add-task]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (el.parentElement.querySelector('[data-new-task]')) return
+      const box = document.createElement('form')
+      box.className = 'board-new-task'
+      box.innerHTML = `<input data-new-task placeholder="Taaknaam" required autocomplete="off">`
+      el.after(box)
+      const input = box.querySelector('input')
+      input.focus()
+      const cancel = () => box.remove()
+      box.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const title = input.value.trim()
+        if (!title) return
+        const bucketId = el.getAttribute('data-add-task') || null
+        const peers = allBoardTodos().filter((t) => (t.bucket_id || '') === (bucketId || ''))
+        await upsert('nh_todos', {
+          title,
+          bucket_id: bucketId || null,
+          status: 'open',
+          progress: 'niet_gestart',
+          priority: 'normaal',
+          checklist: [],
+          sort_order: nextSortOrder(peers)
+        })
+        await refresh()
+        paint()
+      })
+      input.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancel() })
+      input.addEventListener('blur', () => { if (!input.value.trim()) cancel() })
+    })
+  })
+  app.querySelectorAll('[data-add-bucket]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const col = el.closest('.add-col')
+      col.innerHTML = '<input class="board-col-title" data-new-bucket placeholder="Kolomnaam" aria-label="Kolomnaam">'
+      const input = col.querySelector('input')
+      input.focus()
+      const save = async () => {
+        const name = input.value.trim()
+        if (!name) { paint(); return }
+        const row = await upsert('nh_todo_buckets', { name, position: todoBuckets.length })
+        if (!todoBuckets.length) {
+          const orphans = allBoardTodos().filter((t) => !t.bucket_id)
+          await Promise.all(orphans.map((t) => upsert('nh_todos', { bucket_id: row.id }, t.id)))
+        }
+        await refresh()
+        paint()
+      }
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save() }
+        if (e.key === 'Escape') paint()
+      })
+      input.addEventListener('blur', save)
+    })
+  })
+  app.querySelectorAll('[data-rename-bucket]').forEach((el) => {
+    el.addEventListener('change', async () => {
+      const name = el.value.trim()
+      if (!name) { paint(); return }
+      await upsert('nh_todo_buckets', { name }, el.getAttribute('data-rename-bucket'))
+      await refresh()
+    })
+  })
+  app.querySelectorAll('[data-delete-bucket]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      if (!confirm('Kolom verwijderen? Taken blijven bestaan, zonder kolom.')) return
+      await remove('nh_todo_buckets', el.getAttribute('data-delete-bucket'))
+      await refresh()
+      paint()
+    })
+  })
+
+  app.querySelectorAll('[data-card]').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-toggle-todo]')) return
+      if (skipCardClick) return
+      openTaskPanel(el.getAttribute('data-card'))
+    })
+    el.addEventListener('dragstart', (e) => {
+      dragId = el.getAttribute('data-card')
+      skipCardClick = true
+      e.dataTransfer.setData('text/plain', dragId)
+      e.dataTransfer.effectAllowed = 'move'
+      el.classList.add('dragging')
+    })
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging')
+      setTimeout(() => { skipCardClick = false }, 80)
+    })
+  })
+  app.querySelectorAll('[data-drop]').forEach((zone) => {
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      zone.classList.add('drag-over')
+    })
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
+    zone.addEventListener('drop', async (e) => {
+      e.preventDefault()
+      zone.classList.remove('drag-over')
+      const id = dragId || e.dataTransfer.getData('text/plain')
+      if (!id) return
+      const bucketId = zone.getAttribute('data-drop') || null
+      const peers = allBoardTodos().filter((t) => (t.bucket_id || '') === (bucketId || '') && t.id !== id)
+      await upsert('nh_todos', { bucket_id: bucketId || null, sort_order: nextSortOrder(peers) }, id)
+      await refresh()
+      paint()
+    })
+  })
+}
+
 function bind() {
   app.querySelectorAll('[data-go]').forEach((el) => el.addEventListener('click', (e) => {
     if (e.currentTarget.closest('[data-stop]') && e.target.closest('[data-stop]') !== e.currentTarget.closest('td, .row-actions')) return
@@ -2070,6 +2554,13 @@ function bind() {
     const kind = el.getAttribute('data-open')
     const customerId = el.getAttribute('data-customer') || currentCustomerId()
     const recordId = el.getAttribute('data-record')
+    if (kind === 'todo') {
+      openTaskPanel(recordId || null, {
+        customerId,
+        bucketId: el.getAttribute('data-bucket') || ''
+      })
+      return
+    }
     const customer = (kind === 'customer' && el.getAttribute('data-id'))
       ? customers.find((c) => c.id === el.getAttribute('data-id'))
       : customers.find((c) => c.id === customerId)
@@ -2119,7 +2610,7 @@ function bind() {
   }))
   app.querySelectorAll('[data-done]').forEach((el) => el.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation()
-    await upsert('nh_todos', { status: 'done', completed_at: new Date().toISOString() }, el.getAttribute('data-done'))
+    await upsert('nh_todos', fieldsForDone(true), el.getAttribute('data-done'))
     await refresh(); flash('Taak afgerond')
   }))
   app.querySelectorAll('[data-remind-done]').forEach((el) => el.addEventListener('click', async (e) => {
@@ -2156,7 +2647,11 @@ function bind() {
     const cid = el.getAttribute('data-customer')
     if (!idea) return
     if (el.getAttribute('data-convert') === 'todo') {
-      const row = await upsert('nh_todos', { customer_id: cid, title: idea.title, note: idea.body, status: 'open', priority: 'normaal' })
+      const row = await upsert('nh_todos', {
+        customer_id: cid, title: idea.title, note: idea.body, status: 'open',
+        progress: 'niet_gestart', priority: 'normaal',
+        bucket_id: todoBuckets[0]?.id || null, checklist: []
+      })
       await upsert('nh_ideas', { converted_todo_id: row.id }, idea.id)
     } else {
       const row = await upsert('nh_opportunities', { customer_id: cid, title: idea.title, notes: idea.body, phase: 'nieuw', is_upsell: false })
@@ -2164,6 +2659,7 @@ function bind() {
     }
     await refresh(); flash('Idee omgezet')
   }))
+  bindBoard()
   startTimerTick()
   bindTimeRangeUi(app)
 }
