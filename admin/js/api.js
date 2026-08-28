@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 import {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
-  elapsedSeconds, formatElapsed, formatDurationNl
+  elapsedSeconds, formatElapsed, formatDurationNl,
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange
 } from '../../lib/time.js'
 import {
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
@@ -14,6 +15,7 @@ import { allocationsToSave } from '../../lib/money.js'
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
   elapsedSeconds, formatElapsed, formatDurationNl,
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
   todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl

@@ -3,6 +3,7 @@ import {
   QUOTE_STATUSES, REVENUE_KINDS, COST_CATEGORIES, COST_CADENCES, cadenceLabel,
   phaseLabel, typeLabel, statusLabel, shiftPhase,
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType, elapsedSeconds, formatElapsed, formatDurationNl,
+  parseLocalDateTime, toLocalInput, durationParts, addDuration, resolveTimeRange,
   TODO_PROGRESS, TODO_PRIORITIES, TODO_LABEL_COLORS, labelColor,
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
   todosByBucket, nextSortOrder, newChecklistItem, relativeTimeNl,
@@ -331,30 +332,86 @@ function timerCard() {
   }
   return `<button type="button" class="timer-strip" data-go="#/uren">
     <b>Start uren</b>
-    <span class="muted">Kies type en opdrachtgever, daarna start</span>
+    <span class="muted">Klokken of achteraf invullen</span>
   </button>`
 }
 
-function todayTimeRows() {
-  const today = isoDate()
-  return timeEntries.filter((t) => t.ended_at && isoDate(new Date(t.started_at)) === today)
+function timeTypeRadios(selected = '') {
+  return `<div class="field full"><label>Type</label>
+    <div class="time-types">
+      ${TIME_TYPES.map((t) => `
+        <label class="time-type">
+          <input type="radio" name="type" value="${esc(t.id)}" ${selected === t.id ? 'checked' : ''} required>
+          <span>${esc(t.label)}</span>
+        </label>`).join('')}
+    </div>
+  </div>`
 }
 
-function timeTodayList() {
+function timeRangeFields(startedAt, endedAt) {
+  const start = startedAt ? new Date(startedAt) : new Date(Date.now() - 3600000)
+  const end = endedAt ? new Date(endedAt) : new Date()
+  const sec = elapsedSeconds(start, end)
+  const parts = durationParts(sec)
+  return `
+    <div class="field"><label>Start</label><input type="datetime-local" name="started_at" value="${esc(localInput(start))}" required></div>
+    <div class="field"><label>Eind</label><input type="datetime-local" name="ended_at" value="${esc(localInput(end))}" required></div>
+    <div class="field full"><label>Duur</label>
+      <div class="time-duration">
+        <input type="number" name="hours" min="0" step="1" inputmode="numeric" value="${parts.hours}" aria-label="Uren">
+        <span>u</span>
+        <input type="number" name="minutes" min="0" step="1" inputmode="numeric" value="${parts.minutes}" aria-label="Minuten">
+        <span>m</span>
+        <span class="tiny" data-duration>${esc(formatDurationNl(sec))}</span>
+      </div>
+    </div>`
+}
+
+function fmtTimeRange(start, end) {
+  if (!start) return '—'
+  const a = new Date(start)
+  const b = end ? new Date(end) : null
+  if (!b || Number.isNaN(b.getTime())) return fmtDateTime(start)
+  const t = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' })
+  if (isoDate(a) === isoDate(b)) return `${fmtDate(a)}, ${t.format(a)}–${t.format(b)}`
+  return `${fmtDateTime(a)} – ${fmtDateTime(b)}`
+}
+
+function timeEntryRow(t) {
+  return `<div class="item" style="cursor:default">
+    <b>${esc(timeTypeLabel(t.type))} · ${esc(formatDurationNl(t.seconds))}</b>
+    <small>${esc(companyName(t.customer_id))}${t.note ? ' · ' + esc(t.note) : ''} · ${esc(fmtTimeRange(t.started_at, t.ended_at))}</small>
+    <div class="actions">
+      <button type="button" class="btn ghost small" data-open="time" data-record="${esc(t.id)}">Bewerken</button>
+    </div>
+  </div>`
+}
+
+function manualTimeButton(customerId = '') {
+  return `<button type="button" class="btn ghost time-manual" data-open="time"${customerId ? ` data-customer="${esc(customerId)}"` : ''}>Handmatig invoeren</button>`
+}
+
+function timeHistoryList() {
   const run = runningTimer()
-  const done = todayTimeRows()
-  const todaySec = done.reduce((s, t) => s + Number(t.seconds || 0), 0) + (run ? elapsedSeconds(run.started_at) : 0)
+  const done = timeEntries.filter((t) => t.ended_at)
+  const today = isoDate()
+  const todayRows = done.filter((t) => isoDate(new Date(t.started_at)) === today)
+  const earlier = done.filter((t) => isoDate(new Date(t.started_at)) !== today)
+  const todaySec = todayRows.reduce((s, t) => s + Number(t.seconds || 0), 0) + (run ? elapsedSeconds(run.started_at) : 0)
   return `
     <section class="section" style="margin-top:1.2rem">
-      <header><h3>Vandaag${todaySec ? ' · ' + formatDurationNl(todaySec) : ''}</h3></header>
+      <header>
+        <h3>Vandaag${todaySec ? ' · ' + formatDurationNl(todaySec) : ''}</h3>
+        <button type="button" class="btn ghost small" data-open="time">Handmatig</button>
+      </header>
       <div class="body">
-        ${done.length ? `<div class="list">${done.map((t) => `
-          <div class="item" style="cursor:default">
-            <b>${esc(timeTypeLabel(t.type))} · ${esc(formatDurationNl(t.seconds))}</b>
-            <small>${esc(companyName(t.customer_id))}${t.note ? ' · ' + esc(t.note) : ''} · ${fmtDateTime(t.started_at)}</small>
-          </div>`).join('')}</div>` : '<p class="muted">Nog geen gestopte uren vandaag.</p>'}
+        ${todayRows.length ? `<div class="list">${todayRows.map(timeEntryRow).join('')}</div>` : '<p class="muted">Nog geen gestopte uren vandaag. Klok of vul achteraf in.</p>'}
       </div>
-    </section>`
+    </section>
+    ${earlier.length ? `<section class="section" style="margin-top:.8rem">
+      <header><h3>Eerder</h3></header>
+      <div class="body"><div class="list">${earlier.map(timeEntryRow).join('')}</div></div>
+    </section>` : ''}`
 }
 
 function urenView() {
@@ -365,45 +422,41 @@ function urenView() {
       <div class="page-head">
         <div>
           <h1>Uren</h1>
-          <p class="lead">Timer loopt. Stop als je klaar bent.</p>
+          <p class="lead">Timer loopt. Stop als je klaar bent, of zet het echte eindtijdstip als je vergeten bent uit te klokken.</p>
         </div>
         ${plusBar()}
       </div>
       <div class="time-run">
         <p class="time-clock" data-elapsed="${esc(run.started_at)}">0:00</p>
         <p class="lead">${esc(companyName(run.customer_id))} · ${esc(timeTypeLabel(run.type))}</p>
-        <form class="form" data-form="time-stop">
+        <form class="form two" data-form="time-stop">
           <input type="hidden" name="id" value="${esc(run.id)}">
+          ${timeRangeFields(run.started_at, new Date())}
           <div class="field full"><label>Toelichting</label><input name="note" value="${esc(run.note || '')}" placeholder="Optioneel, bijv. homepage of belletje over offerte"></div>
-          <button class="btn time-go stop" type="submit">Stop</button>
+          <div class="field full"><button class="btn time-go stop" type="submit">Stop</button></div>
         </form>
       </div>
-      ${timeTodayList()}
+      ${customers.length ? `<p class="time-or">of</p>${manualTimeButton(preselect)}` : ''}
+      ${timeHistoryList()}
     `, 'time')
   }
   return shell(`
     <div class="page-head">
       <div>
         <h1>Uren</h1>
-        <p class="lead">Kies type, kies opdrachtgever, start. Eén timer tegelijk.</p>
+        <p class="lead">Kies type, kies opdrachtgever, start. Of vul uren achteraf in als je vergeten bent te klokken.</p>
       </div>
       ${plusBar()}
     </div>
     ${customers.length ? `
     <form class="form time-start-form" data-form="time-start">
-      <div class="field full"><label>Type</label>
-        <div class="time-types">
-          ${TIME_TYPES.map((t) => `
-            <label class="time-type">
-              <input type="radio" name="type" value="${esc(t.id)}" required>
-              <span>${esc(t.label)}</span>
-            </label>`).join('')}
-        </div>
-      </div>
+      ${timeTypeRadios()}
       ${customerPicker(preselect)}
       <button class="btn time-go" type="submit">Start</button>
-    </form>` : '<p class="muted">Voeg eerst een opdrachtgever toe via + → Klant.</p>'}
-    ${timeTodayList()}
+    </form>
+    <p class="time-or">of</p>
+    ${manualTimeButton(preselect)}` : '<p class="muted">Voeg eerst een opdrachtgever toe via + → Klant.</p>'}
+    ${timeHistoryList()}
   `, 'time')
 }
 
@@ -411,6 +464,7 @@ function plusBar() {
   const cid = currentCustomerId()
   const items = cid ? [
     ['todo', 'Taak', cid],
+    ['time', 'Uren', cid],
     ['opp', 'Kans', cid],
     ['quote', 'Offerte', cid],
     ['mail', 'E-mail', cid],
@@ -420,6 +474,7 @@ function plusBar() {
   ] : [
     ['customer', 'Klant', ''],
     ['todo', 'Taak', ''],
+    ['time', 'Uren', ''],
     ['activity', 'Contact', ''],
     ['quote', 'Offerte', ''],
     ['mail', 'E-mail', ''],
@@ -437,11 +492,11 @@ function plusBar() {
     </div>`
 }
 
-function customerPicker(selected, { required = true, allowNone = false, name = 'customer_id' } = {}) {
+function customerPicker(selected, { required = true, allowNone = false, name = 'customer_id', full = false } = {}) {
   const first = allowNone
     ? '<option value="">Niet gekoppeld</option>'
     : '<option value="">Kies klant…</option>'
-  return `<div class="field"><label>Klant</label><select name="${name}" ${required && !allowNone ? 'required' : ''}>${first}${customers.map((c) => `<option value="${esc(c.id)}" ${c.id === selected ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}</select></div>`
+  return `<div class="field${full ? ' full' : ''}"><label>Klant</label><select name="${name}" ${required && !allowNone ? 'required' : ''}>${first}${customers.map((c) => `<option value="${esc(c.id)}" ${c.id === selected ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}</select></div>`
 }
 
 function contactPersonFields(c, selectedId) {
@@ -1435,7 +1490,7 @@ function customerView(c) {
       </div>
       ${plusBar()}
     </div>
-    <p class="tiny" style="margin-bottom:.7rem"><a href="#/uren?customer=${esc(c.id)}">Start uren voor deze opdrachtgever</a></p>
+    <p class="tiny" style="margin-bottom:.7rem"><a href="#/uren?customer=${esc(c.id)}">Start uren</a> · <button type="button" class="btn ghost small" data-open="time" data-customer="${c.id}">Handmatig invoeren</button></p>
     ${logBar(c)}
     ${customerTabs(c, tab)}
     <div class="stack">${tabBody}</div>
@@ -1465,8 +1520,7 @@ function buildTimeline(c) {
 }
 
 function localInput(d) {
-  const x = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-  return x.toISOString().slice(0, 16)
+  return toLocalInput(d)
 }
 
 function customerMailTab(c) {
@@ -1679,6 +1733,118 @@ function bindAllocUi(root) {
   rebind()
 }
 
+function endedFromForm(v, fallbackStart) {
+  return resolveTimeRange({
+    startedAt: v.started_at || fallbackStart,
+    endedAt: v.ended_at,
+    hours: v.hours,
+    minutes: v.minutes
+  })
+}
+
+async function persistTimeEntry({ id, customer_id, type, startedAt, endedAt, hours, minutes, note }) {
+  if (!customer_id || !type) throw new Error('Kies type en opdrachtgever.')
+  const { started, ended } = endedFromForm(
+    { started_at: startedAt, ended_at: endedAt, hours, minutes },
+    startedAt
+  )
+  if (!started) throw new Error('Vul een starttijd in.')
+  if (!ended) throw new Error('Vul een eindtijd of duur in.')
+  if (ended < started) throw new Error('Eindtijd moet na de start liggen.')
+  const seconds = elapsedSeconds(started, ended)
+  if (seconds <= 0) throw new Error('Duur moet groter zijn dan 0.')
+  const noteText = (note || '').trim()
+  const existing = id ? timeEntries.find((t) => t.id === id) : null
+  const summary = [timeTypeLabel(type), formatDurationNl(seconds), noteText].filter(Boolean).join(' · ')
+  let logId = existing?.contact_log_id || null
+  if (customer_id) {
+    const payload = {
+      customer_id,
+      type: mapTimeTypeToLogType(type),
+      summary,
+      occurred_at: started.toISOString()
+    }
+    try {
+      const log = await upsert('nh_contact_logs', payload, logId)
+      logId = log.id
+    } catch {
+      const log = await upsert('nh_contact_logs', payload)
+      logId = log.id
+    }
+  }
+  return upsert('nh_time_entries', {
+    customer_id,
+    type,
+    started_at: started.toISOString(),
+    ended_at: ended.toISOString(),
+    seconds,
+    note: noteText || null,
+    contact_log_id: logId
+  }, id || null)
+}
+
+async function onDeleteTimeEntry(e, modal) {
+  e.preventDefault()
+  e.stopPropagation()
+  const id = e.currentTarget.getAttribute('data-delete-time')
+  const row = timeEntries.find((t) => t.id === id)
+  if (!row) return
+  if (!confirm('Deze uren verwijderen?')) return
+  await remove('nh_time_entries', id)
+  if (row.contact_log_id) {
+    try { await remove('nh_contact_logs', row.contact_log_id) } catch { /* log mag al weg zijn */ }
+  }
+  closeModal(modal)
+  await refresh()
+  flash('Uren verwijderd')
+}
+
+function bindTimeRangeUi(root) {
+  const startEl = root.querySelector('[name="started_at"]')
+  const endEl = root.querySelector('[name="ended_at"]')
+  const hoursEl = root.querySelector('[name="hours"]')
+  const minsEl = root.querySelector('[name="minutes"]')
+  const durEl = root.querySelector('[data-duration]')
+  const clock = root.querySelector('.time-clock[data-elapsed]')
+  if (!startEl || !endEl) return
+
+  const fromRange = () => {
+    const start = parseLocalDateTime(startEl.value)
+    const end = parseLocalDateTime(endEl.value)
+    if (start && clock) clock.setAttribute('data-elapsed', start.toISOString())
+    if (!start || !end) {
+      if (durEl) durEl.textContent = '—'
+      return
+    }
+    const sec = elapsedSeconds(start, end)
+    const parts = durationParts(sec)
+    const editingDuration = document.activeElement === hoursEl || document.activeElement === minsEl
+    if (!editingDuration) {
+      if (hoursEl) hoursEl.value = parts.hours
+      if (minsEl) minsEl.value = parts.minutes
+    }
+    if (durEl) durEl.textContent = formatDurationNl(sec)
+  }
+
+  const fromDuration = () => {
+    const start = parseLocalDateTime(startEl.value)
+    if (!start) return
+    const end = addDuration(start, hoursEl?.value, minsEl?.value)
+    if (!end) return
+    endEl.value = localInput(end)
+    const sec = elapsedSeconds(start, end)
+    if (durEl) durEl.textContent = formatDurationNl(sec)
+  }
+
+  startEl.addEventListener('change', fromRange)
+  startEl.addEventListener('input', fromRange)
+  endEl.addEventListener('change', fromRange)
+  endEl.addEventListener('input', fromRange)
+  hoursEl?.addEventListener('input', fromDuration)
+  minsEl?.addEventListener('input', fromDuration)
+  fromRange()
+}
+
 function showModal(kind, payload = {}) {
   const wrap = document.createElement('div')
   wrap.id = 'modal-root'
@@ -1690,7 +1856,8 @@ function showModal(kind, payload = {}) {
   const existingCost = kind === 'cost' && payload.recordId ? costs.find((x) => x.id === payload.recordId) : null
   const existingMail = kind === 'mail' && payload.recordId ? emails.find((m) => m.id === payload.recordId) : null
   const existingTemplate = kind === 'template' && payload.recordId ? mailTemplates.find((t) => t.id === payload.recordId) : null
-  const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || existingMail?.customer_id || ''
+  const existingTime = kind === 'time' && payload.recordId ? timeEntries.find((t) => t.id === payload.recordId) : null
+  const customerId = payload.customerId || payload.customer?.id || existingTodo?.cid || existingOpp?.cid || existingLog?.cid || existingQuote?.cid || existingRev?.cid || existingMail?.customer_id || existingTime?.customer_id || ''
   const c = payload.customer || customers.find((x) => x.id === customerId)
   const needCustomer = !c && ['opp', 'contact', 'activity', 'quote'].includes(kind) && !payload.recordId
   if (kind === 'customer') wrap.innerHTML = modalHtml(payload.customer?.id ? 'Klant bewerken' : 'Nieuwe klant', customerForm(payload.customer || {}), 'customer')
@@ -1839,6 +2006,17 @@ function showModal(kind, payload = {}) {
     `, 'mail', 'Versturen')
     wrap.querySelector('.modal')?.classList.add('wide')
   }
+  if (kind === 'time') {
+    const existing = existingTime && existingTime.ended_at ? existingTime : null
+    wrap.innerHTML = modalHtml(existing ? 'Uren bewerken' : 'Uren invoeren', `
+      <input type="hidden" name="id" value="${esc(existing?.id || '')}">
+      ${timeTypeRadios(existing?.type || '')}
+      ${customerPicker(existing?.customer_id || customerId, { full: true })}
+      ${timeRangeFields(existing?.started_at, existing?.ended_at)}
+      <div class="field full"><label>Toelichting</label><input name="note" value="${esc(existing?.note || '')}" placeholder="Optioneel"></div>
+      ${existing ? `<div class="field full"><button type="button" class="btn danger" data-delete-time="${esc(existing.id)}">Verwijderen</button></div>` : ''}
+    `, 'time-entry', existing ? 'Opslaan' : 'Toevoegen')
+  }
   if (!wrap.innerHTML) return
   document.body.classList.add('modal-open')
   document.body.appendChild(wrap)
@@ -1856,6 +2034,10 @@ function showModal(kind, payload = {}) {
   })
   bindAllocUi(wrap)
   bindMailTemplateSelect(wrap, !!existingMail)
+  bindTimeRangeUi(wrap)
+  wrap.querySelectorAll('[data-delete-time]').forEach((el) => {
+    el.addEventListener('click', (e) => onDeleteTimeEntry(e, wrap))
+  })
   wrap.querySelectorAll('[data-delete]').forEach((el) => {
     el.addEventListener('click', async (e) => {
       e.preventDefault()
@@ -1974,28 +2156,35 @@ async function onSubmit(e, modal) {
     if (kind === 'time-stop') {
       const row = timeEntries.find((t) => t.id === v.id) || runningTimer()
       if (!row) throw new Error('Geen lopende timer.')
-      const ended = new Date()
-      const seconds = elapsedSeconds(row.started_at, ended)
-      const note = (v.note || '').trim()
-      const summary = [timeTypeLabel(row.type), formatDurationNl(seconds), note].filter(Boolean).join(' · ')
-      let logId = null
-      if (row.customer_id) {
-        const log = await upsert('nh_contact_logs', {
-          customer_id: row.customer_id,
-          type: mapTimeTypeToLogType(row.type),
-          summary,
-          occurred_at: new Date(row.started_at).toISOString()
-        })
-        logId = log.id
-      }
-      await upsert('nh_time_entries', {
-        ended_at: ended.toISOString(),
-        seconds,
-        note: note || null,
-        contact_log_id: logId
-      }, row.id)
+      const saved = await persistTimeEntry({
+        id: row.id,
+        customer_id: row.customer_id,
+        type: row.type,
+        startedAt: v.started_at,
+        endedAt: v.ended_at,
+        hours: v.hours,
+        minutes: v.minutes,
+        note: v.note
+      })
       await refresh()
-      flash('Gestopt · ' + formatDurationNl(seconds))
+      flash('Gestopt · ' + formatDurationNl(saved.seconds))
+      go('#/uren')
+      return
+    }
+    if (kind === 'time-entry') {
+      const saved = await persistTimeEntry({
+        id: v.id,
+        customer_id: v.customer_id,
+        type: v.type,
+        startedAt: v.started_at,
+        endedAt: v.ended_at,
+        hours: v.hours,
+        minutes: v.minutes,
+        note: v.note
+      })
+      await refresh()
+      closeModal(modal)
+      flash((v.id ? 'Uren aangepast' : 'Uren ingevuld') + ' · ' + formatDurationNl(saved.seconds))
       go('#/uren')
       return
     }
@@ -2472,6 +2661,7 @@ function bind() {
   }))
   bindBoard()
   startTimerTick()
+  bindTimeRangeUi(app)
 }
 
 async function boot() {
