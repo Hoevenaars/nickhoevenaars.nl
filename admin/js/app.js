@@ -924,7 +924,7 @@ function logBar(c) {
 
 function customerTabs(c, tab) {
   const unread = (c.emails || []).filter((m) => m.direction === 'in' && !m.read_at).length
-  const tabs = [['werk', 'Werk'], ['mail', unread ? `Mail (${unread})` : 'Mail'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Geld']]
+  const tabs = [['werk', 'Werk'], ['mail', unread ? `Mail (${unread})` : 'Mail'], ['tijdlijn', 'Tijdlijn'], ['gegevens', 'Gegevens'], ['geld', 'Finance']]
   return `<div class="tabs">${tabs.map(([id, label]) =>
     `<button type="button" class="tab ${tab === id ? 'active' : ''}" data-go="#/klanten/${c.id}?tab=${id}">${label}</button>`
   ).join('')}</div>`
