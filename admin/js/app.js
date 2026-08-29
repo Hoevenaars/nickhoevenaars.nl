@@ -8,10 +8,19 @@ import {
   checklistStats, isOverdue, formatDueShort, fieldsForDone, fieldsForProgress,
   todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl,
   requireAdmin, loadCustomers, loadCustomer, loadCosts, loadLooseRevenues, loadLooseTodos, loadEmails, loadMailTemplates, loadTimeEntries, loadTodoBuckets, loadTodoLabels, loadTodoLabelLinks, loadTodoComments, setTodoLabels, sendMailApi, replaceAllocations,
+  uploadPdfFile, signedPdfUrl, removePdfFile,
   upsert, remove, setPhase,
   daysSince, isoDate, addDays
 } from './api.js'
 import { resolveAllocations } from '../../lib/money.js'
+import {
+  isPdfFile,
+  assertPdfSize,
+  safePdfName,
+  quotePdfPath,
+  mailPdfPath,
+  collectMailAttachments
+} from '../../lib/files.js'
 
 const app = document.getElementById('app')
 let session = null
@@ -1471,11 +1480,13 @@ function customerMoneyTab(c) {
           <div class="item" style="cursor:default">
             <b>${esc(q.title)}</b>
             <small>${money(q.amount)} · ${fmtDate(q.issued_at)}${q.valid_until ? ' · geldig tot ' + fmtDate(q.valid_until) : ''}</small>
+            ${q.pdf_path ? `<p class="tiny"><button type="button" class="btn ghost small" data-pdf="${esc(q.pdf_path)}">${esc(q.pdf_name || 'PDF')}</button></p>` : ''}
             <div class="row-actions" style="margin-top:.45rem">
               <select data-quote-status="${q.id}" aria-label="Offertestatus">
                 ${options(QUOTE_STATUSES, q.status)}
               </select>
               <button type="button" class="btn ghost small" data-open="quote" data-record="${q.id}" data-customer="${c.id}">Bewerken</button>
+              <button type="button" class="btn ghost small" data-open="mail" data-customer="${c.id}" data-quote="${q.id}">Mailen</button>
               ${q.status === 'geaccepteerd' && !booked ? `<button type="button" class="btn small" data-book-quote="${q.id}">Boek als opbrengst</button>` : ''}
               ${booked ? '<span class="chip green">geboekt</span>' : ''}
             </div>
@@ -1576,9 +1587,9 @@ function mailListView(params) {
   if (f === 'ongelezen') rows = rows.filter((m) => threadOf(m.id).some((x) => x.direction === 'in' && !x.read_at))
   if (f === 'in') rows = rows.filter((m) => m.direction === 'in')
   if (f === 'uit') rows = rows.filter((m) => m.direction === 'out')
-  if (q) {
+    if (q) {
     rows = rows.filter((m) => {
-      const blob = [m.subject, m.from_email, m.from_name, ...(m.to_emails || []), companyForMail(m), m.text_body].join(' ').toLowerCase()
+      const blob = [m.subject, m.from_email, m.from_name, ...(m.to_emails || []), companyForMail(m), m.text_body, ...((m.attachments || []).map((a) => a.filename))].join(' ').toLowerCase()
       return blob.includes(q)
     })
   }
@@ -1599,6 +1610,60 @@ function mailListView(params) {
     </div>
     <div class="list">${rows.map(mailRow).join('') || '<p class="muted">Nog geen mail. Stuur er een via + → E-mail.</p>'}</div>
   `, 'mail')
+}
+
+function mailAttachmentsHtml(m) {
+  const files = Array.isArray(m.attachments) ? m.attachments : []
+  if (!files.length) return ''
+  return `<div class="mail-attach">${files.map((f) => (
+    f.path
+      ? `<button type="button" class="btn ghost small" data-pdf="${esc(f.path)}">${esc(f.filename || 'PDF')}</button>`
+      : `<span class="chip">${esc(f.filename || 'PDF')}</span>`
+  )).join('')}</div>`
+}
+
+function quotesWithPdf(customerId) {
+  if (!customerId) return []
+  return allQuotes().filter((q) => (q.cid || q.customer_id) === customerId && q.pdf_path)
+}
+
+function quotePdfFields(customerId, selectedIds = []) {
+  const quotes = quotesWithPdf(customerId)
+  const selected = new Set((selectedIds || []).map(String).filter(Boolean))
+  if (!quotes.length) return '<p class="tiny">Geen offerte-PDF bij deze klant. Kies hieronder een bestand.</p>'
+  return quotes.map((q) => `
+    <label class="check">
+      <input type="checkbox" name="quote_pdf" value="${esc(q.id)}" ${selected.has(q.id) ? 'checked' : ''}>
+      ${esc(q.pdf_name || 'PDF')} · ${esc(q.title)}
+    </label>`).join('')
+}
+
+function bindPdfLinks(root) {
+  root?.querySelectorAll('[data-pdf]').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      try {
+        const url = await signedPdfUrl(el.getAttribute('data-pdf'))
+        window.open(url, '_blank', 'noopener')
+      } catch (err) {
+        alert(err.message || 'PDF openen mislukt.')
+      }
+    })
+  })
+}
+
+function bindMailPdfUi(wrap, quoteId) {
+  const box = wrap.querySelector('[data-quote-pdfs]')
+  if (!box) return
+  const customerSel = wrap.querySelector('select[name="customer_id"]')
+  const paintPdfs = () => {
+    const cid = customerSel?.value || wrap.querySelector('input[name="customer_id"]')?.value || ''
+    const selected = [...box.querySelectorAll('[name="quote_pdf"]:checked')].map((el) => el.value)
+    if (quoteId && !selected.length) selected.push(quoteId)
+    box.innerHTML = quotePdfFields(cid, selected)
+  }
+  customerSel?.addEventListener('change', paintPdfs)
 }
 
 function mailBodyHtml(m) {
@@ -1641,6 +1706,7 @@ function mailThreadView(id) {
         </header>
         <div class="body">
           <p class="tiny">Van ${esc(m.from_email)} → ${esc((m.to_emails || []).join(', ') || '—')}</p>
+          ${mailAttachmentsHtml(m)}
           ${mailBodyHtml(m)}
         </div>
       </article>`).join('')}
@@ -1954,7 +2020,15 @@ function showModal(kind, payload = {}) {
     <div class="field"><label>Status</label><select name="status">${options(QUOTE_STATUSES, existingQuote?.status || 'concept')}</select></div>
     <div class="field"><label>Datum</label><input type="date" name="issued_at" value="${esc(existingQuote?.issued_at || isoDate())}"></div>
     <div class="field"><label>Geldig tot</label><input type="date" name="valid_until" value="${esc(existingQuote?.valid_until || '')}"></div>
-    <div class="field full"><label>Notities</label><textarea name="notes">${esc(existingQuote?.notes || '')}</textarea></div>`, 'quote')
+    <div class="field full"><label>Notities</label><textarea name="notes">${esc(existingQuote?.notes || '')}</textarea></div>
+    <div class="field full"><label>PDF</label>
+      ${existingQuote?.pdf_path ? `<p class="tiny pdf-now">
+        <button type="button" class="btn ghost small" data-pdf="${esc(existingQuote.pdf_path)}">${esc(existingQuote.pdf_name || 'PDF')}</button>
+        <label class="check"><input type="checkbox" name="remove_pdf" value="1"> Verwijderen</label>
+      </p>` : ''}
+      <input type="file" name="pdf" accept="application/pdf,.pdf">
+      <p class="tiny">Alleen PDF, max 10 MB.</p>
+    </div>`, 'quote')
   if (kind === 'revenue') wrap.innerHTML = modalHtml(existingRev ? 'Opbrengst bewerken' : 'Opbrengst', `
     <input type="hidden" name="id" value="${esc(existingRev?.id || '')}">
     <input type="hidden" name="quote_id" value="${esc(existingRev?.quote_id || '')}">
@@ -2000,13 +2074,15 @@ function showModal(kind, payload = {}) {
     wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (kind === 'mail') {
+    const quoteId = payload.quoteId || ''
+    const quote = quoteId ? allQuotes().find((q) => q.id === quoteId) : null
     const person = primaryContact(c)
     const to = existingMail
       ? (existingMail.direction === 'in' ? existingMail.from_email : ((existingMail.to_emails || [])[0] || ''))
       : (person?.email || '')
     const subject = existingMail
       ? (/^re\s*:/i.test(existingMail.subject || '') ? existingMail.subject : `Re: ${existingMail.subject || ''}`)
-      : ''
+      : (quote ? `Offerte: ${quote.title}` : '')
     const contactsWithMail = (c?.contacts || []).filter((p) => p.email)
     const quoted = quotedMailBody(existingMail)
     wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
@@ -2022,6 +2098,12 @@ function showModal(kind, payload = {}) {
       </div>
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}" autocomplete="off"></div>
       <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
+      <div class="field full">
+        <label>PDF bijvoegen</label>
+        <div data-quote-pdfs>${quotePdfFields(c?.id || customerId, quote?.pdf_path ? [quote.id] : [])}</div>
+        <input type="file" name="pdf" accept="application/pdf,.pdf">
+        <p class="tiny">Offerte-PDF aanvinken of een bestand van je computer. Max 10 MB.</p>
+      </div>
       <div class="field full">
         <label>Voettekst (automatisch)</label>
         <div class="mail-footer">${esc(MAIL_FOOTER)}</div>
@@ -2057,6 +2139,8 @@ function showModal(kind, payload = {}) {
   })
   bindAllocUi(wrap)
   bindMailTemplateSelect(wrap, !!existingMail)
+  bindMailPdfUi(wrap, payload.quoteId)
+  bindPdfLinks(wrap)
   bindTimeRangeUi(wrap)
   wrap.querySelectorAll('[data-delete-time]').forEach((el) => {
     el.addEventListener('click', (e) => onDeleteTimeEntry(e, wrap))
@@ -2252,10 +2336,26 @@ async function onSubmit(e, modal) {
     if (kind === 'quote') {
       const id = v.id
       delete v.id
-      await upsert('nh_quotes', {
+      const existing = id ? allQuotes().find((q) => q.id === id) : null
+      const file = form.querySelector('input[name="pdf"]')?.files?.[0] || null
+      if (file) {
+        if (!isPdfFile(file)) throw new Error('Alleen PDF-bestanden.')
+        assertPdfSize(file.size)
+      }
+      const row = await upsert('nh_quotes', {
         customer_id: v.customer_id, title: v.title, amount: v.amount ? Number(v.amount) : null,
         status: v.status || 'concept', issued_at: v.issued_at || isoDate(), valid_until: v.valid_until, notes: v.notes
       }, id)
+      let pdfPath = existing?.pdf_path || null
+      if (file) {
+        const nextPath = quotePdfPath(row.id, crypto.randomUUID())
+        await uploadPdfFile(nextPath, file)
+        if (pdfPath && pdfPath !== nextPath) await removePdfFile(pdfPath)
+        await upsert('nh_quotes', { pdf_path: nextPath, pdf_name: safePdfName(file.name) }, row.id)
+      } else if (v.remove_pdf && pdfPath) {
+        await removePdfFile(pdfPath)
+        await upsert('nh_quotes', { pdf_path: null, pdf_name: null }, row.id)
+      }
     }
     if (kind === 'revenue') {
       const id = v.id
@@ -2313,18 +2413,34 @@ async function onSubmit(e, modal) {
         return
       }
       if (token) claimedMailSends.add(token)
+      let uploadedPath = null
       let sent
       try {
+        const file = form.querySelector('input[name="pdf"]')?.files?.[0] || null
+        if (file) {
+          if (!isPdfFile(file)) throw new Error('Alleen PDF-bestanden.')
+          assertPdfSize(file.size)
+          uploadedPath = mailPdfPath(crypto.randomUUID())
+          await uploadPdfFile(uploadedPath, file)
+        }
+        const quoteIds = [...form.querySelectorAll('[name="quote_pdf"]:checked')].map((el) => el.value)
+        const attachments = collectMailAttachments({
+          quotes: allQuotes(),
+          quoteIds,
+          extra: uploadedPath ? [{ path: uploadedPath, filename: safePdfName(file.name) }] : []
+        })
         sent = await sendMailApi({
           to: v.to,
           subject: v.subject,
           text: withMailFooter(v.text),
           customer_id: v.customer_id,
           contact_id: v.contact_id,
-          reply_to_id: v.reply_to_id
+          reply_to_id: v.reply_to_id,
+          attachments
         })
       } catch (err) {
         if (token) claimedMailSends.delete(token)
+        if (uploadedPath) await removePdfFile(uploadedPath)
         throw err
       }
       closeModal(modal)
@@ -2590,6 +2706,7 @@ function bind() {
     const kind = el.getAttribute('data-open')
     const customerId = el.getAttribute('data-customer') || currentCustomerId()
     const recordId = el.getAttribute('data-record')
+    const quoteId = el.getAttribute('data-quote')
     if (kind === 'todo') {
       openTaskPanel(recordId || null, {
         customerId,
@@ -2601,7 +2718,7 @@ function bind() {
       ? customers.find((c) => c.id === el.getAttribute('data-id'))
       : customers.find((c) => c.id === customerId)
     try {
-      showModal(kind, { customer, customerId: customer?.id || customerId, recordId })
+      showModal(kind, { customer, customerId: customer?.id || customerId, recordId, quoteId })
     } catch (err) {
       console.error(err)
       alert(err.message || String(err))
@@ -2696,6 +2813,7 @@ function bind() {
     await refresh(); flash('Idee omgezet')
   }))
   bindBoard()
+  bindPdfLinks(app)
   startTimerTick()
   bindTimeRangeUi(app)
 }
