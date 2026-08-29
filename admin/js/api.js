@@ -17,6 +17,7 @@ import {
   assertPdfSize,
   isOwnedPdfPath
 } from '../../lib/files.js'
+import { fullName } from '../../lib/contacts.js'
 
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
@@ -152,7 +153,7 @@ export async function loadCustomer(id) {
 
 function normalizeCustomer(c) {
   const logs = (c.nh_contact_logs || []).sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at))
-  const contacts = (c.nh_contacts || []).sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.name.localeCompare(b.name, 'nl'))
+  const contacts = (c.nh_contacts || []).sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || fullName(a).localeCompare(fullName(b), 'nl'))
   const todos = (c.nh_todos || []).sort((a, b) => (a.due_at || '9999').localeCompare(b.due_at || '9999'))
   const opps = (c.nh_opportunities || []).sort((a, b) => (a.next_action_at || '9999').localeCompare(b.next_action_at || '9999'))
   const ideas = (c.nh_ideas || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
