@@ -176,6 +176,9 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   margin-top: .55rem; color: var(--ink)
 }
 .mail-msg header { align-items: baseline }
+.mail-attach { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem }
+.pdf-now { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap }
+.field input[type="file"] { padding: .4rem; font-size: .82rem }
 .nav-btn .chip { margin-left: .15rem; font-size: .68rem; padding: 0 .4rem }
 .item.settings-bucket { cursor: default }
 .settings-bucket-name {

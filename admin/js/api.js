@@ -11,6 +11,12 @@ import {
   todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl
 } from '../../lib/todos.js'
 import { allocationsToSave } from '../../lib/money.js'
+import {
+  PDF_BUCKET,
+  isPdfFile,
+  assertPdfSize,
+  isOwnedPdfPath
+} from '../../lib/files.js'
 
 export {
   TIME_TYPES, timeTypeLabel, mapTimeTypeToLogType,
@@ -300,6 +306,31 @@ export async function loadTimeEntries() {
     return []
   }
   return data || []
+}
+
+export async function uploadPdfFile(path, file) {
+  if (!isPdfFile(file)) throw new Error('Alleen PDF-bestanden.')
+  assertPdfSize(file.size)
+  if (!isOwnedPdfPath(path)) throw new Error('Ongeldig bestandspad.')
+  const { error } = await sb.storage.from(PDF_BUCKET).upload(path, file, {
+    contentType: 'application/pdf',
+    upsert: false
+  })
+  if (error) throw error
+  return path
+}
+
+export async function signedPdfUrl(path) {
+  if (!isOwnedPdfPath(path)) throw new Error('Ongeldig bestandspad.')
+  const { data, error } = await sb.storage.from(PDF_BUCKET).createSignedUrl(path, 60 * 60)
+  if (error) throw error
+  return data.signedUrl
+}
+
+export async function removePdfFile(path) {
+  if (!path || !isOwnedPdfPath(path)) return
+  const { error } = await sb.storage.from(PDF_BUCKET).remove([path])
+  if (error) console.warn('pdf remove:', error.message)
 }
 
 export async function sendMailApi(payload) {
