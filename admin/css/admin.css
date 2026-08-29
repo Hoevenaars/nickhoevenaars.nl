@@ -222,7 +222,8 @@ tbody tr:hover { background: rgba(59,130,246,.07) }
   font-size: .92rem;
   line-height: 1.45;
 }
-.check { display: flex; align-items: center; gap: .45rem; font-size: .88rem; color: var(--muted) }
+.greeting-switch { display: flex; flex-wrap: wrap; gap: .45rem 1.1rem }
+.greeting-switch .check { color: var(--ink) }
 
 .timeline { display: flex; flex-direction: column; gap: 0 }
 .tl {

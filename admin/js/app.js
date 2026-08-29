@@ -21,6 +21,8 @@ import {
   mailPdfPath,
   collectMailAttachments
 } from '../../lib/files.js'
+import { GENDERS, namesOf, fullName, contactRecord, formalGreetingReady } from '../../lib/contacts.js'
+import { mailGreeting, applyMailGreeting, fillFromMailTemplate } from '../../lib/mail.js'
 
 const app = document.getElementById('app')
 let session = null
@@ -251,7 +253,7 @@ function matchesQuery(c, q) {
   if (!q) return true
   const blob = [
     c.company_name, c.extra_notes, c.website, c.address, c.phone,
-    ...c.contacts.flatMap((p) => [p.name, p.email, p.phone, p.role]),
+    ...c.contacts.flatMap((p) => [fullName(p), p.first_name, p.last_name, p.email, p.phone, p.role]),
     ...c.logs.flatMap((l) => [l.summary, l.outcome, l.follow_up]),
     ...c.todos.map((t) => t.title + ' ' + (t.note || '')),
     ...c.notes.map((n) => n.body),
@@ -511,15 +513,26 @@ function customerPicker(selected, { required = true, allowNone = false, name = '
 function contactPersonFields(c, selectedId) {
   const person = c?.contacts?.find((p) => p.id === selectedId) || null
   const listId = 'contacts-' + (c?.id || 'all')
-  const names = (c?.contacts || []).map((p) => `<option value="${esc(p.name)}">`).join('')
+  const names = (c?.contacts || []).map((p) => `<option value="${esc(fullName(p))}">`).join('')
   return `
     <div class="field"><label>Contactpersoon</label>
-      <input name="contact_name" list="${listId}" placeholder="Typ een naam of kies uit de lijst" value="${esc(person?.name || '')}">
+      <input name="contact_name" list="${listId}" placeholder="Typ een naam of kies uit de lijst" value="${esc(fullName(person))}">
       <datalist id="${listId}">${names}</datalist>
     </div>
     <div class="field"><label>E-mail</label><input name="contact_email" type="email" value="${esc(person?.email || '')}" placeholder="nieuw of bestaand"></div>
     <div class="field"><label>Telefoon</label><input name="contact_phone" value="${esc(person?.phone || '')}" placeholder="optioneel"></div>
     <div class="field"><label>Rol</label><input name="contact_role" value="${esc(person?.role || '')}" placeholder="optioneel"></div>`
+}
+
+function contactNameFields(p = {}) {
+  const n = namesOf(p)
+  return `
+    <div class="field"><label>Voornaam</label><input name="first_name" required value="${esc(n.first_name)}" placeholder="Ada" autocomplete="given-name"></div>
+    <div class="field"><label>Achternaam</label><input name="last_name" value="${esc(n.last_name)}" placeholder="Jansen" autocomplete="family-name"></div>
+    <div class="field"><label>Geslacht</label>
+      <select name="gender">${options(GENDERS, p.gender || '', [{ id: '', label: '—' }])}</select>
+      <p class="tiny">Voor de formele aanhef: Beste heer/mevrouw</p>
+    </div>`
 }
 
 function customerCostShare(customerId, cadence) {
@@ -1328,7 +1341,7 @@ function logBar(c) {
       <select name="type" aria-label="Type">${options(CONTACT_TYPES, 'telefoon')}</select>
       <select name="contact_name" aria-label="Wie">
         <option value="">Wie</option>
-        ${c.contacts.map((p) => `<option value="${esc(p.name)}" ${p.id === person?.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+        ${c.contacts.map((p) => `<option value="${esc(fullName(p))}" ${p.id === person?.id ? 'selected' : ''}>${esc(fullName(p))}</option>`).join('')}
       </select>
       <input name="summary" required placeholder="Wat is er gebeurd?" autocomplete="off">
       <button class="btn small" type="submit">Log</button>
@@ -1454,7 +1467,11 @@ function customerDetailsTab(c) {
           <form class="form two person-form" data-form="contact">
             <input type="hidden" name="id" value="${esc(p.id)}">
             <input type="hidden" name="customer_id" value="${esc(c.id)}">
-            <div class="field"><label>Naam</label><input name="name" required value="${esc(p.name)}"></div>
+            <div class="field"><label>Voornaam</label><input name="first_name" required value="${esc(namesOf(p).first_name)}" autocomplete="given-name"></div>
+            <div class="field"><label>Achternaam</label><input name="last_name" value="${esc(namesOf(p).last_name)}" autocomplete="family-name"></div>
+            <div class="field"><label>Geslacht</label>
+              <select name="gender">${options(GENDERS, p.gender || '', [{ id: '', label: '—' }])}</select>
+            </div>
             <div class="field"><label>Rol</label><input name="role" value="${esc(p.role || '')}"></div>
             <div class="field"><label>E-mail</label><input name="email" type="email" value="${esc(p.email || '')}"></div>
             <div class="field"><label>Telefoon</label><input name="phone" value="${esc(p.phone || '')}"></div>
@@ -1515,7 +1532,7 @@ function customerView(c) {
         <h1>${esc(c.company_name)}</h1>
         <p class="lead cust-meta">
           <span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span>
-          ${person ? `<span>${esc(person.name)}${contactLinks(person) ? ' · ' + contactLinks(person) : ''}</span>` : ''}
+          ${person ? `<span>${esc(fullName(person))}${contactLinks(person) ? ' · ' + contactLinks(person) : ''}</span>` : ''}
           ${c.phone && c.phone !== person?.phone ? `<span>${contactLinks({ phone: c.phone })}</span>` : ''}
           ${!person && !c.phone ? '<span class="muted">Geen contactpersoon</span>' : ''}
           <span class="muted">Laatst ${c.lastContactAt ? fmtDate(c.lastContactAt) : '—'}</span>
@@ -1538,7 +1555,7 @@ function buildTimeline(c) {
     items.push({
       at: l.occurred_at,
       when: fmtDateTime(l.occurred_at),
-      title: `${typeLabel(l.type)} ${who ? 'met ' + who.name : ''}`.trim(),
+      title: `${typeLabel(l.type)} ${who ? 'met ' + fullName(who) : ''}`.trim(),
       body: [l.summary, l.outcome && ('Uitkomst: ' + l.outcome), l.follow_up && ('Vervolg: ' + l.follow_up)].filter(Boolean).join(' '),
       logId: l.id
     })
@@ -1729,22 +1746,73 @@ function quotedMailBody(existingMail) {
   return `\n\n\n> ${String(existingMail.text_body).split('\n').join('\n> ')}`
 }
 
-function bindMailTemplateSelect(wrap, isReply) {
+function contactForMail(customer, { contactId, email } = {}) {
+  const list = customer?.contacts || []
+  const needle = String(email || '').trim().toLowerCase()
+  if (needle) {
+    return list.find((p) => String(p.email || '').trim().toLowerCase() === needle) || null
+  }
+  if (contactId) {
+    const byId = list.find((p) => p.id === contactId)
+    if (byId) return byId
+  }
+  return primaryContact(customer)
+}
+
+function bindMailCompose(wrap, initialCustomer, isReply) {
+  const toEl = wrap.querySelector('[name="to"]')
+  const textEl = wrap.querySelector('[name="text"]')
+  const contactIdEl = wrap.querySelector('[name="contact_id"]')
+  if (!textEl) return
+  let customer = initialCustomer
+  const styleOf = () => wrap.querySelector('[name="greeting_style"]:checked')?.value || 'informeel'
+  const personNow = () => {
+    const cid = wrap.querySelector('select[name="customer_id"]')?.value || wrap.querySelector('input[name="customer_id"]')?.value || ''
+    customer = customers.find((x) => x.id === cid) || customer
+    return contactForMail(customer, { contactId: contactIdEl?.value, email: toEl?.value })
+  }
+  const paintGreeting = () => {
+    const person = personNow()
+    if (contactIdEl) contactIdEl.value = person?.id || ''
+    const greeting = mailGreeting(person, styleOf())
+    textEl.value = applyMailGreeting(textEl.value, greeting)
+    const hint = wrap.querySelector('[data-greeting-hint]')
+    if (hint) {
+      hint.textContent = styleOf() === 'formeel' && !formalGreetingReady(person)
+        ? 'Vul geslacht en achternaam in bij het contact voor “Beste heer/mevrouw …”.'
+        : ''
+    }
+  }
+  wrap.querySelectorAll('[name="greeting_style"]').forEach((el) => el.addEventListener('change', paintGreeting))
+  toEl?.addEventListener('change', paintGreeting)
+  wrap.querySelector('select[name="customer_id"]')?.addEventListener('change', () => {
+    const cid = wrap.querySelector('select[name="customer_id"]')?.value || ''
+    customer = customers.find((x) => x.id === cid) || null
+    const list = wrap.querySelector('#mail-to')
+    const withMail = (customer?.contacts || []).filter((p) => p.email)
+    if (list) list.innerHTML = withMail.map((p) => `<option value="${esc(p.email)}">${esc(fullName(p))}</option>`).join('')
+    const person = primaryContact(customer)
+    if (toEl && person?.email) toEl.value = person.email
+    if (contactIdEl) contactIdEl.value = person?.id || ''
+    paintGreeting()
+  })
   const sel = wrap.querySelector('select[name="template_id"]')
-  if (!sel) return
-  sel.addEventListener('change', () => {
+  sel?.addEventListener('change', () => {
     const t = mailTemplates.find((x) => x.id === sel.value)
     if (!t) return
     const subjectEl = wrap.querySelector('[name="subject"]')
-    const bodyEl = wrap.querySelector('[name="text"]')
     const quoted = wrap.querySelector('[name="quoted"]')?.value || ''
-    const filled = {
-      subject: (isReply && subjectEl.value) ? subjectEl.value : (t.subject || ''),
-      body: (t.body || '') + quoted
-    }
+    const filled = fillFromMailTemplate(t, {
+      isReply,
+      currentSubject: subjectEl.value,
+      quoted,
+      footer: '',
+      greeting: mailGreeting(personNow(), styleOf())
+    })
     subjectEl.value = filled.subject
-    bodyEl.value = filled.body
+    textEl.value = filled.body
   })
+  paintGreeting()
 }
 
 function modalHtml(title, body, formName, submitLabel = 'Opslaan') {
@@ -1952,7 +2020,7 @@ function showModal(kind, payload = {}) {
   if (kind === 'customer') wrap.innerHTML = modalHtml(payload.customer?.id ? 'Klant bewerken' : 'Nieuwe klant', customerForm(payload.customer || {}), 'customer')
   if (kind === 'contact') wrap.innerHTML = modalHtml('Contactpersoon', `
     ${c ? `<input type="hidden" name="customer_id" value="${esc(c.id)}">` : customerPicker(customerId)}
-    <div class="field"><label>Naam</label><input name="name" required placeholder="Typ de naam"></div>
+    ${contactNameFields()}
     <div class="field"><label>Rol</label><input name="role"></div>
     <div class="field"><label>E-mail</label><input name="email" type="email"></div>
     <div class="field"><label>Telefoon</label><input name="phone"></div>
@@ -2069,14 +2137,21 @@ function showModal(kind, payload = {}) {
       <input type="hidden" name="id" value="${esc(existingTemplate?.id || '')}">
       <div class="field full"><label>Naam</label><input name="name" required value="${esc(existingTemplate?.name || '')}" placeholder="Bijv. Introductie"></div>
       <div class="field full"><label>Onderwerp</label><input name="subject" value="${esc(existingTemplate?.subject || '')}"></div>
-      <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Hoi,">${esc(existingTemplate?.body || '')}</textarea></div>
+      <div class="field full"><label>Bericht</label><textarea name="body" rows="10" placeholder="Bedankt voor je bericht.">${esc(existingTemplate?.body || '')}</textarea>
+        <p class="tiny">Zonder aanhef. Hi / Beste wordt automatisch gezet vanuit het contact.</p>
+      </div>
     `, 'template')
     wrap.querySelector('.modal')?.classList.add('wide')
   }
   if (kind === 'mail') {
     const quoteId = payload.quoteId || ''
     const quote = quoteId ? allQuotes().find((q) => q.id === quoteId) : null
-    const person = primaryContact(c)
+    const person = contactForMail(c, {
+      contactId: existingMail?.contact_id,
+      email: existingMail
+        ? (existingMail.direction === 'in' ? existingMail.from_email : ((existingMail.to_emails || [])[0] || ''))
+        : primaryContact(c)?.email
+    }) || primaryContact(c)
     const to = existingMail
       ? (existingMail.direction === 'in' ? existingMail.from_email : ((existingMail.to_emails || [])[0] || ''))
       : (person?.email || '')
@@ -2085,6 +2160,7 @@ function showModal(kind, payload = {}) {
       : (quote ? `Offerte: ${quote.title}` : '')
     const contactsWithMail = (c?.contacts || []).filter((p) => p.email)
     const quoted = quotedMailBody(existingMail)
+    const opening = applyMailGreeting(quoted, mailGreeting(person, 'informeel'))
     wrap.innerHTML = modalHtml(existingMail ? 'Beantwoorden' : 'Nieuwe mail', `
       <input type="hidden" name="reply_to_id" value="${esc(existingMail?.id || '')}">
       <input type="hidden" name="contact_id" value="${esc((existingMail?.contact_id || person?.id) || '')}">
@@ -2094,10 +2170,18 @@ function showModal(kind, payload = {}) {
       ${mailTemplatePicker()}
       <div class="field full"><label>Aan</label>
         <input name="to" type="email" required value="${esc(to)}" list="mail-to" placeholder="naam@bedrijf.nl" autocomplete="email">
-        <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join('')}</datalist>
+        <datalist id="mail-to">${contactsWithMail.map((p) => `<option value="${esc(p.email)}">${esc(fullName(p))}</option>`).join('')}</datalist>
       </div>
       <div class="field full"><label>Onderwerp</label><input name="subject" required value="${esc(subject)}" autocomplete="off"></div>
-      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hoi,">${esc(quoted)}</textarea></div>
+      <div class="field full">
+        <label>Aanhef</label>
+        <div class="greeting-switch">
+          <label class="check"><input type="radio" name="greeting_style" value="informeel" checked> Hi voornaam</label>
+          <label class="check"><input type="radio" name="greeting_style" value="formeel"> Beste heer/mevrouw</label>
+        </div>
+        <p class="tiny" data-greeting-hint></p>
+      </div>
+      <div class="field full"><label>Bericht</label><textarea name="text" required placeholder="Hi,">${esc(opening)}</textarea></div>
       <div class="field full">
         <label>PDF bijvoegen</label>
         <div data-quote-pdfs>${quotePdfFields(c?.id || customerId, quote?.pdf_path ? [quote.id] : [])}</div>
@@ -2138,7 +2222,7 @@ function showModal(kind, payload = {}) {
     if (quick.value) wrap.querySelector('[name="remind_at"]').value = addDays(Number(quick.value))
   })
   bindAllocUi(wrap)
-  bindMailTemplateSelect(wrap, !!existingMail)
+  bindMailCompose(wrap, c, !!existingMail)
   bindMailPdfUi(wrap, payload.quoteId)
   bindPdfLinks(wrap)
   bindTimeRangeUi(wrap)
@@ -2157,7 +2241,13 @@ function showModal(kind, payload = {}) {
       else flash('Verwijderd')
     })
   })
-  if (kind === 'mail') wrap.querySelector('textarea[name="text"]')?.setSelectionRange(0, 0)
+  if (kind === 'mail') {
+    const ta = wrap.querySelector('textarea[name="text"]')
+    if (ta) {
+      const after = (ta.value.match(/^[^\n]*\n\n/) || ['Hi,\n\n'])[0].length
+      ta.setSelectionRange(after, after)
+    }
+  }
 }
 
 function fd(form) {
@@ -2180,17 +2270,20 @@ async function resolveContact(customerId, v) {
   const name = (v.contact_name || '').trim()
   if (!name || !customerId) return null
   const cust = customers.find((x) => x.id === customerId)
-  let person = cust?.contacts.find((p) => p.name.toLowerCase() === name.toLowerCase())
+  let person = cust?.contacts.find((p) => fullName(p).toLowerCase() === name.toLowerCase())
+  const parts = namesOf({ name })
   const payload = {
     customer_id: customerId,
-    name,
+    first_name: parts.first_name,
+    last_name: parts.last_name || null,
+    name: [parts.first_name, parts.last_name].filter(Boolean).join(' ') || name,
     email: v.contact_email || null,
     phone: v.contact_phone || null,
     role: v.contact_role || null
   }
   if (person) {
     const next = {
-      ...payload,
+      customer_id: customerId,
       email: v.contact_email || person.email || null,
       phone: v.contact_phone || person.phone || null,
       role: v.contact_role || person.role || null
@@ -2308,7 +2401,7 @@ async function onSubmit(e, modal) {
     if (kind === 'contact') {
       const id = v.id
       delete v.id
-      await upsert('nh_contacts', { customer_id: v.customer_id, name: v.name, role: v.role, email: v.email, phone: v.phone, is_primary: !!v.is_primary }, id)
+      await upsert('nh_contacts', contactRecord(v), id)
     }
     if (kind === 'todo-label') {
       await upsert('nh_todo_labels', { name: v.name, color: v.color || 'pink' })
