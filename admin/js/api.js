@@ -11,6 +11,7 @@ import {
   todosByBucket, nextSortOrder, nextBucketPosition, moveBucket, newChecklistItem, relativeTimeNl
 } from '../../lib/todos.js'
 import { allocationsToSave } from '../../lib/money.js'
+import { openQuotesOf, quoteNextAction } from '../../lib/funnel.js'
 import {
   PDF_BUCKET,
   isPdfFile,
@@ -163,7 +164,8 @@ function normalizeCustomer(c) {
   const lastLog = logs[0] || null
   const openTodos = todos.filter((t) => t.status === 'open')
   const openOpps = opps.filter((o) => o.phase !== 'akkoord' && o.phase !== 'verloren' && o.phase !== 'onhold')
-  const nextAction = nextActionFor(c, { logs, openTodos, openOpps, reminders })
+  const openQuotes = openQuotesOf(quotes)
+  const nextAction = nextActionFor(c, { logs, openTodos, openOpps, openQuotes, reminders })
   return {
     ...c,
     contacts,
@@ -179,6 +181,7 @@ function normalizeCustomer(c) {
     lastContactAt: lastLog?.occurred_at || null,
     openTodos,
     openOpps,
+    openQuotes,
     nextAction,
     revenueTotal: revenues.reduce((s, r) => s + Number(r.amount || 0), 0)
   }
@@ -361,13 +364,15 @@ export async function replaceAllocations(costId, rows) {
   return data
 }
 
-function nextActionFor(c, { logs, openTodos, openOpps, reminders }) {
+function nextActionFor(c, { logs, openTodos, openOpps, openQuotes, reminders }) {
   const bits = []
   const soonestTodo = openTodos.find((t) => t.due_at) || openTodos[0]
   const soonestOpp = openOpps.find((o) => o.next_action)
+  const soonestQuote = (openQuotes || []).map(quoteNextAction).find(Boolean)
   const soonestRem = reminders.find((r) => !r.done)
   if (soonestTodo) bits.push({ label: soonestTodo.title, at: soonestTodo.due_at, kind: 'todo' })
   if (soonestOpp) bits.push({ label: soonestOpp.next_action, at: soonestOpp.next_action_at, kind: 'sales' })
+  if (soonestQuote) bits.push(soonestQuote)
   if (soonestRem) bits.push({ label: soonestRem.title, at: soonestRem.remind_at, kind: 'reminder' })
   const follow = logs[0]?.follow_up
   if (follow) bits.push({ label: follow, at: null, kind: 'follow' })

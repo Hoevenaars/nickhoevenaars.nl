@@ -13,6 +13,7 @@ import {
   daysSince, isoDate, addDays
 } from './api.js'
 import { resolveAllocations } from '../../lib/money.js'
+import { funnelRows, pipelineTotal, shiftQuoteStatus } from '../../lib/funnel.js'
 import {
   isPdfFile,
   assertPdfSize,
@@ -628,6 +629,12 @@ function workItems() {
       if (!kind) continue
       push(kind, o.title, `Sales · ${c.company_name}`, `#/klanten/${c.id}?tab=werk`, o.next_action_at, o.next_action || fmtDate(o.next_action_at))
     }
+    for (const q of c.openQuotes) {
+      const at = q.valid_until
+      const kind = dateBucket(at)
+      if (!kind) continue
+      push(kind, q.title, `Offerte · ${c.company_name}`, `#/klanten/${c.id}?tab=geld`, at, q.status === 'verstuurd' ? 'verstuurd' : 'concept')
+    }
     if (c.status === 'inactief' || c.status === 'verloren') continue
     if (!c.lastContactAt) {
       push('overdue', c.company_name, 'Nog geen contact', `#/klanten/${c.id}`, '0000', '—')
@@ -699,7 +706,7 @@ function customersView(params) {
   let rows = customers.filter((c) => matchesQuery(c, q))
   if (f === 'taken') rows = rows.filter((c) => c.openTodos.length)
   if (f === 'stil') rows = rows.filter(stale)
-  if (f === 'sales') rows = rows.filter((c) => c.openOpps.length)
+  if (f === 'sales') rows = rows.filter((c) => c.openOpps.length || c.openQuotes.length)
 
   const filters = [
     ['alle', 'Alle'],
@@ -730,7 +737,7 @@ function customersView(params) {
         <tbody>
           ${rows.map((c) => `
             <tr data-go="#/klanten/${c.id}">
-              <td><b>${esc(c.company_name)}</b>${c.openTodos.length || c.openOpps.length ? `<div class="tiny">${c.openTodos.length ? c.openTodos.length + ' taak' : ''}${c.openTodos.length && c.openOpps.length ? ' · ' : ''}${c.openOpps.length ? c.openOpps.length + ' kans' : ''}</div>` : ''}</td>
+              <td><b>${esc(c.company_name)}</b>${customerOpenBits(c)}</td>
               <td><span class="chip ${chipForStatus(c.status)}">${esc(statusLabel(c.status))}</span></td>
               <td>${c.lastContactAt ? `${fmtDate(c.lastContactAt)}${stale(c) ? '<div class="tiny">stil</div>' : ''}` : '<span class="muted">Nog geen</span>'}</td>
               <td>${c.nextAction ? `${esc(c.nextAction.label)}${c.nextAction.at ? `<div class="tiny">${fmtDate(c.nextAction.at)}</div>` : ''}` : '—'}</td>
@@ -741,15 +748,22 @@ function customersView(params) {
   `, 'customers')
 }
 
+function customerOpenBits(c) {
+  const bits = []
+  if (c.openTodos.length) bits.push(c.openTodos.length === 1 ? '1 taak' : `${c.openTodos.length} taken`)
+  if (c.openOpps.length) bits.push(c.openOpps.length === 1 ? '1 kans' : `${c.openOpps.length} kansen`)
+  if (c.openQuotes.length) bits.push(c.openQuotes.length === 1 ? '1 offerte' : `${c.openQuotes.length} offertes`)
+  return bits.length ? `<div class="tiny">${bits.join(' · ')}</div>` : ''
+}
+
 function salesView() {
-  const rows = customers.flatMap((c) => c.opps.map((o) => ({ ...o, company: c.company_name, cid: c.id })))
-    .sort((a, b) => PHASE_VALUES.indexOf(a.phase === 'onhold' ? 'verloren' : a.phase) - PHASE_VALUES.indexOf(b.phase === 'onhold' ? 'verloren' : b.phase))
+  const rows = funnelRows(customers)
 
   return shell(`
     <div class="page-head">
       <div>
         <h1>Funnel</h1>
-        <p class="lead">Fase opschuiven. De rest staat bij de klant.</p>
+        <p class="lead">Kansen én offertes. Fase opschuiven koppelt de offertestatus mee.</p>
       </div>
       ${plusBar()}
     </div>
@@ -761,19 +775,24 @@ function salesView() {
         <tbody>
           ${rows.map((o) => {
             const i = PHASE_VALUES.indexOf(o.phase === 'onhold' ? 'verloren' : o.phase)
+            const quote = o.kind === 'quote'
+            const href = `#/klanten/${o.cid}?tab=${quote ? 'geld' : 'werk'}`
+            const phaseAttr = quote ? `data-quote-phase="${o.id}"` : `data-phase="${o.id}"`
+            const canPrev = quote ? shiftQuoteStatus(o.quote_status, -1) !== o.quote_status : i > 0
+            const canNext = quote ? shiftQuoteStatus(o.quote_status, 1) !== o.quote_status : i < PHASE_VALUES.length - 1
             return `
-            <tr data-go="#/klanten/${o.cid}?tab=werk">
-              <td><b>${esc(o.company)}</b><div class="tiny">${esc(o.title)}</div></td>
-              <td><span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span></td>
+            <tr data-go="${href}">
+              <td><b>${esc(o.company)}</b><div class="tiny">${esc(o.title)}${o.amount ? ' · ' + money(o.amount) : ''}</div></td>
+              <td><span class="chip ${chipForPhase(o.phase)}">${esc(phaseLabel(o.phase))}</span>${quote ? ' <span class="chip">Offerte</span>' : ''}</td>
               <td>${esc(o.next_action || '—')}</td>
               <td>${fmtDate(o.next_action_at)}</td>
               <td class="row-actions" data-stop="1">
-                <button type="button" class="btn ghost small" data-open="opp" data-record="${o.id}" data-customer="${o.cid}">Bewerken</button>
-                <button class="icon-btn" data-phase="${o.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''} title="Vorige fase">←</button>
-                <button class="icon-btn" data-phase="${o.id}" data-dir="1" ${i >= PHASE_VALUES.length - 1 ? 'disabled' : ''} title="Volgende fase">→</button>
+                <button type="button" class="btn ghost small" data-open="${quote ? 'quote' : 'opp'}" data-record="${o.id}" data-customer="${o.cid}">Bewerken</button>
+                <button class="icon-btn" ${phaseAttr} data-dir="-1" ${canPrev ? '' : 'disabled'} title="Vorige fase">←</button>
+                <button class="icon-btn" ${phaseAttr} data-dir="1" ${canNext ? '' : 'disabled'} title="Volgende fase">→</button>
               </td>
             </tr>`
-          }).join('') || `<tr><td colspan="5" class="muted">Nog geen kansen.</td></tr>`}
+          }).join('') || `<tr><td colspan="5" class="muted">Nog geen kansen of offertes.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -1214,7 +1233,7 @@ function moneyView() {
   const periodRevenues = allRevenues.filter((r) => r.kind === 'maandelijks' || inPeriod(r.received_at, p))
   const totalRevOnce = periodRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? 0 : Number(r.amount || 0)), 0)
   const totalRevMonth = allRevenues.reduce((s, r) => s + (r.kind === 'maandelijks' ? Number(r.amount || 0) : 0), 0)
-  const pipeline = customers.flatMap((c) => c.openOpps).reduce((s, o) => s + Number(o.potential_value || 0), 0)
+  const pipeline = pipelineTotal(customers)
   const acceptedQuotes = customers.flatMap((c) => (c.quotes || []).filter((q) => q.status === 'geaccepteerd'))
     .reduce((s, q) => s + Number(q.amount || 0), 0)
   const perCustomer = customers.map((c) => {
@@ -1358,7 +1377,7 @@ function customerTabs(c, tab) {
 function customerWorkTab(c) {
   const openReminders = c.reminders.filter((r) => !r.done)
   const openIdeas = c.ideas.filter((i) => !i.converted_todo_id && !i.converted_opportunity_id)
-  const empty = !c.openTodos.length && !c.openOpps.length && !openReminders.length && !openIdeas.length
+  const empty = !c.openTodos.length && !c.openOpps.length && !openReminders.length && !openIdeas.length && !c.openQuotes.length
   const today = isoDate()
   const hoursToday = timeEntries.filter((t) => t.customer_id === c.id && t.ended_at && isoDate(new Date(t.started_at)) === today)
   const run = runningTimer()
@@ -1366,6 +1385,7 @@ function customerWorkTab(c) {
   return `
     ${hourSec ? `<p class="tiny">Uren vandaag: ${esc(formatDurationNl(hourSec))}${run?.customer_id === c.id ? ' (loopt)' : ''}</p>` : ''}
     ${empty ? '<p class="muted">Niets open. Log contact of voeg een taak toe.</p>' : ''}
+    ${!c.openTodos.length && !c.openOpps.length && c.openQuotes.length ? `<p class="muted">Open offerte staat onder <a href="#/klanten/${c.id}?tab=geld">Finance</a>.</p>` : ''}
     ${c.openTodos.length ? `<section class="section">
       <header><h3>Taken</h3><button class="btn ghost small" data-open="todo" data-customer="${c.id}">Toevoegen</button></header>
       <div class="body list">${c.openTodos.map((t) => `
@@ -2760,6 +2780,18 @@ function bind() {
     await setPhase(id, shiftPhase(opp.phase, dir))
     await refresh()
     flash('Fase aangepast')
+  }))
+  app.querySelectorAll('[data-quote-phase]').forEach((el) => el.addEventListener('click', async (e) => {
+    e.preventDefault(); e.stopPropagation()
+    const id = el.getAttribute('data-quote-phase')
+    const dir = Number(el.getAttribute('data-dir'))
+    const q = customers.flatMap((c) => c.quotes || []).find((x) => x.id === id)
+    if (!q) return
+    const next = shiftQuoteStatus(q.status, dir)
+    if (next === q.status) return
+    await upsert('nh_quotes', { status: next }, id)
+    await refresh()
+    flash('Offertestatus aangepast')
   }))
   app.querySelectorAll('[data-done]').forEach((el) => el.addEventListener('click', async (e) => {
     e.preventDefault(); e.stopPropagation()
