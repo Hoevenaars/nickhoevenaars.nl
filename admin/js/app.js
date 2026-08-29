@@ -14,6 +14,7 @@ import {
 } from './api.js'
 import { resolveAllocations } from '../../lib/money.js'
 import { funnelRows, pipelineTotal, shiftQuoteStatus } from '../../lib/funnel.js'
+import { plusContextFromRoute, plusItems } from '../../lib/plus.js'
 import {
   isPdfFile,
   assertPdfSize,
@@ -465,38 +466,21 @@ function urenView() {
       <button class="btn time-go" type="submit">Start</button>
     </form>
     <p class="time-or">of</p>
-    ${manualTimeButton(preselect)}` : '<p class="muted">Voeg eerst een opdrachtgever toe via + → Klant.</p>'}
+    ${manualTimeButton(preselect)}` : '<p class="muted">Voeg eerst een opdrachtgever toe onder Opdrachtgevers.</p>'}
     ${timeHistoryList()}
   `, 'time')
 }
 
-function plusBar() {
-  const cid = currentCustomerId()
-  const items = cid ? [
-    ['todo', 'Taak', cid],
-    ['time', 'Uren', cid],
-    ['opp', 'Kans', cid],
-    ['quote', 'Offerte', cid],
-    ['mail', 'E-mail', cid],
-    ['revenue', 'Opbrengst', cid],
-    ['contact', 'Contactpersoon', cid],
-    ['cost', 'Kosten', cid]
-  ] : [
-    ['customer', 'Klant', ''],
-    ['todo', 'Taak', ''],
-    ['time', 'Uren', ''],
-    ['activity', 'Contact', ''],
-    ['quote', 'Offerte', ''],
-    ['mail', 'E-mail', ''],
-    ['cost', 'Kosten', ''],
-    ['revenue', 'Opbrengst', '']
-  ]
+function plusBar(customerId) {
+  const { parts, params } = hash()
+  const ctx = plusContextFromRoute(parts, params)
+  const items = plusItems(ctx, customerId || currentCustomerId() || ctx.customerId)
   return `
     <div class="plus" data-plus>
       <button type="button" class="plus-btn" title="Toevoegen" aria-label="Toevoegen">+</button>
       <div class="plus-menu">
-        ${items.map(([open, label, customer]) =>
-          `<button type="button" data-open="${open}"${customer ? ` data-customer="${esc(customer)}"` : ''}>${label}</button>`
+        ${items.map((item) =>
+          `<button type="button" data-open="${esc(item.open)}"${item.customerId ? ` data-customer="${esc(item.customerId)}"` : ''}>${esc(item.label)}</button>`
         ).join('')}
       </div>
     </div>`
@@ -1628,7 +1612,7 @@ function mailListView(params) {
     <div class="filters">
       ${filters.map(([id, label]) => `<button class="filter ${f === id ? 'active' : ''}" data-go="#/mail?f=${id}${q ? '&q=' + encodeURIComponent(params.q) : ''}">${label}</button>`).join('')}
     </div>
-    <div class="list">${rows.map(mailRow).join('') || '<p class="muted">Nog geen mail. Stuur er een via + → E-mail.</p>'}</div>
+    <div class="list">${rows.map(mailRow).join('') || '<p class="muted">Nog geen mail. Stuur er een via + → Nieuwe mail.</p>'}</div>
   `, 'mail')
 }
 
@@ -1710,6 +1694,7 @@ function mailThreadView(id) {
       </div>
       <div class="row-actions">
         <button class="btn" data-open="mail" data-record="${latest.id}"${cid ? ` data-customer="${cid}"` : ''}>Beantwoorden</button>
+        ${plusBar(cid)}
       </div>
     </div>
     ${!cid ? `<form class="log-bar" data-form="link-mail" data-mail="${latest.id}">
