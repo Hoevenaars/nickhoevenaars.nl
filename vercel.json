@@ -1,4 +1,60 @@
 {
+  "redirects": [
+    {
+      "source": "/finance",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    },
+    {
+      "source": "/finance/",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    },
+    {
+      "source": "/finance/budget",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    },
+    {
+      "source": "/finance/goals",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    },
+    {
+      "source": "/finance/transactions",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    },
+    {
+      "source": "/finance/more",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/admin", "destination": "/admin/index.html" },
     { "source": "/admin/", "destination": "/admin/index.html" },
@@ -18,6 +74,14 @@
   "headers": [
     {
       "source": "/admin/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/finance",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/finance/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]
