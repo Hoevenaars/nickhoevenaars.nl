@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow, nocache">
+<meta name="theme-color" content="#F6F3EE">
+<title>Fluweel · Financiën</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm",
+    "@supabase/ssr": "https://cdn.jsdelivr.net/npm/@supabase/ssr@0.12.5/+esm"
+  }
+}
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#F6F3EE;color:#1F1B16;font-family:'Plus Jakarta Sans',system-ui,sans-serif}
+.wrap{width:100%;max-width:28rem;margin:0 auto;padding:4.5rem 1.25rem 3rem}
+.brand{font-size:.875rem;color:#6B4FA0;margin-bottom:.75rem}
+h1{font-size:1.85rem;font-weight:600;letter-spacing:-.03em;margin-bottom:.75rem}
+.lead{color:#6F6A64;font-size:.9rem;line-height:1.6;max-width:22rem;margin-bottom:2rem}
+form{display:flex;flex-direction:column;gap:1rem}
+label{display:flex;flex-direction:column;gap:.4rem;font-size:.875rem;font-weight:500;color:#3F3A36}
+input{height:3rem;border:1px solid #E4DFD6;background:#fff;border-radius:1rem;padding:0 .9rem;font:inherit;color:inherit}
+input:focus{outline:none;border-color:#6B4FA0;box-shadow:0 0 0 3px rgba(107,79,160,.18)}
+button{height:3rem;border:0;border-radius:1rem;background:#4A3A78;color:#fff;font:inherit;font-weight:500;cursor:pointer}
+button:hover{background:#3F3168}
+button:disabled{opacity:.55;cursor:wait}
+.err{color:#9F3A32;font-size:.875rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="brand">Fluweel</p>
+  <h1>Waar sta je nu?</h1>
+  <p class="lead">Log in voor je eigen financiën. Geen voorbeeldcijfers.</p>
+  <form id="login-form">
+    <label>E-mail
+      <input name="email" type="email" autocomplete="username" required>
+    </label>
+    <label>Wachtwoord
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p class="err" id="err" hidden></p>
+    <button type="submit">Log in</button>
+  </form>
+</div>
+<script type="module">
+import { createBrowserClient } from '@supabase/ssr'
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '/admin/js/config.js'
+
+try { window.localStorage.removeItem('fluweel-finance-demo-v1') } catch {}
+
+const sb = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+const form = document.getElementById('login-form')
+const err = document.getElementById('err')
+const btn = form.querySelector('button')
+
+const { data: existing } = await sb.auth.getSession()
+if (existing.session) window.location.replace('/finance/')
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault()
+  err.hidden = true
+  btn.disabled = true
+  const data = new FormData(form)
+  const { error } = await sb.auth.signInWithPassword({
+    email: String(data.get('email') || ''),
+    password: String(data.get('password') || '')
+  })
+  if (error) {
+    err.hidden = false
+    err.textContent = 'Inloggen lukte niet. Controleer e-mail en wachtwoord.'
+    btn.disabled = false
+    return
+  }
+  try { window.localStorage.removeItem('fluweel-finance-demo-v1') } catch {}
+  window.location.replace('/finance/')
+})
+</script>
+</body>
+</html>
