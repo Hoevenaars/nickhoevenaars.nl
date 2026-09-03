@@ -53,11 +53,24 @@
       ],
       "destination": "/finance/login",
       "permanent": false
+    },
+    {
+      "source": "/finance/accounts",
+      "missing": [
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token" },
+        { "type": "cookie", "key": "sb-mnuktfrpgtjtkwowfvrh-auth-token.0" }
+      ],
+      "destination": "/finance/login",
+      "permanent": false
     }
   ],
   "rewrites": [
     { "source": "/admin", "destination": "/admin/index.html" },
     { "source": "/admin/", "destination": "/admin/index.html" },
+    { "source": "/finance/accounts", "destination": "/finance/accounts.html" },
+    { "source": "/finance/accounts/", "destination": "/finance/accounts.html" },
+    { "source": "/finance/budget", "destination": "/finance/budget.html" },
+    { "source": "/finance/budget/", "destination": "/finance/budget.html" },
     {
       "source": "/finance",
       "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance"

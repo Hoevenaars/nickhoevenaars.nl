@@ -1,0 +1,31 @@
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;background:#F6F3EE;color:#1F1B16;font-family:'Plus Jakarta Sans',system-ui,sans-serif;padding-bottom:5.5rem}
+.wrap{width:100%;max-width:28rem;margin:0 auto;padding:1.5rem 1.25rem 2rem}
+.brand{font-size:.8rem;color:#6B4FA0;margin-bottom:.35rem}
+h1{font-size:1.7rem;font-weight:600;letter-spacing:-.03em}
+.lead{color:#6F6A64;font-size:.9rem;line-height:1.5;margin:.45rem 0 1.25rem}
+.card{background:#fff;border-radius:1.5rem;padding:1rem 1.1rem;box-shadow:0 0 0 1px rgba(31,27,22,.08);margin-bottom:.75rem}
+.row{display:flex;align-items:center;justify-content:space-between;gap:1rem;width:100%;text-align:left;background:none;border:0;font:inherit;color:inherit;cursor:pointer;padding:.35rem 0}
+.row:not(:last-child){border-bottom:1px solid #EFEAE3;padding-bottom:.85rem;margin-bottom:.85rem}
+.name{font-weight:600}
+.meta{font-size:.75rem;color:#6F6A64;margin-top:.15rem}
+.money{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+form{display:flex;flex-direction:column;gap:.85rem;margin-top:.35rem}
+label{display:flex;flex-direction:column;gap:.35rem;font-size:.85rem;font-weight:500;color:#3F3A36}
+input,select{height:3rem;border:1px solid #E4DFD6;background:#fff;border-radius:1rem;padding:0 .9rem;font:inherit;color:inherit}
+input:focus,select:focus{outline:none;border-color:#6B4FA0;box-shadow:0 0 0 3px rgba(107,79,160,.18)}
+.actions{display:flex;gap:.6rem}
+button,.btn{height:3rem;border:0;border-radius:1rem;background:#4A3A78;color:#fff;font:inherit;font-weight:500;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+button:hover,.btn:hover{background:#3F3168}
+button.secondary,.btn.secondary{background:#EFEAE3;color:#1F1B16}
+button.secondary:hover,.btn.secondary:hover{background:#E4DFD6}
+button.ghost{background:transparent;color:#6B4FA0;height:auto;padding:.4rem 0}
+button:disabled{opacity:.55;cursor:wait}
+.err{color:#9F3A32;font-size:.875rem}
+.ok{color:#2F6B4A;font-size:.875rem}
+.empty{text-align:center;color:#6F6A64;padding:1.4rem .5rem}
+.nav{position:fixed;left:0;right:0;bottom:0;background:#F6F3EE;border-top:1px solid #E4DFD6;display:flex;justify-content:center}
+.nav .inner{width:100%;max-width:28rem;display:flex}
+.nav a{flex:1;text-align:center;padding:.9rem .2rem .95rem;font-size:.75rem;color:#6F6A64;text-decoration:none}
+.nav a.active{color:#4A3A78;font-weight:600}
+.badge{display:inline-block;font-size:.7rem;color:#6F6A64;margin-top:.2rem}
