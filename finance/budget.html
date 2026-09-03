@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#F6F3EE">
+<title>Begroting · Fluweel</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/finance-ui/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm",
+    "@supabase/ssr": "https://cdn.jsdelivr.net/npm/@supabase/ssr@0.12.5/+esm"
+  }
+}
+</script>
+</head>
+<body>
+<div class="wrap">
+  <p class="brand">Fluweel</p>
+  <h1>Begroting</h1>
+  <p class="lead">Tik een aankomende rekening of inkomst aan om naam, bedrag of datum aan te passen.</p>
+  <section class="card">
+    <p class="meta" style="margin-bottom:.6rem">Nog te betalen</p>
+    <div id="expenses"></div>
+  </section>
+  <section class="card">
+    <p class="meta" style="margin-bottom:.6rem">Nog te ontvangen</p>
+    <div id="income"></div>
+  </section>
+  <form id="form" class="card" hidden>
+    <input type="hidden" name="id">
+    <label>Naam
+      <input name="description" required>
+    </label>
+    <label>Bedrag
+      <input name="amount" inputmode="decimal" required>
+    </label>
+    <label>Datum
+      <input name="date" type="date" required>
+    </label>
+    <p id="msg" hidden></p>
+    <div class="actions">
+      <button type="submit">Bewaar</button>
+      <button type="button" class="secondary" id="cancel">Annuleer</button>
+    </div>
+    <div class="actions">
+      <button type="button" class="secondary" id="pay">Markeer als betaald</button>
+      <button type="button" class="ghost" id="skip">Overslaan</button>
+    </div>
+  </form>
+</div>
+<nav class="nav"><div class="inner">
+  <a href="/finance/">Home</a>
+  <a href="/finance/transactions">Transacties</a>
+  <a href="/finance/budget" class="active">Begroting</a>
+  <a href="/finance/goals">Doelen</a>
+</div></nav>
+<script type="module">
+import {
+  createSb, requireUser, parseAmount, formatMoney, formatDay, showMsg
+} from '/finance-ui/app.js'
+
+const sb = createSb()
+await requireUser(sb)
+const form = document.getElementById('form')
+const msg = document.getElementById('msg')
+let items = []
+
+function field (name) { return form.elements[name] }
+
+function escapeHtml (value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]))
+}
+
+function signedAmount (item) {
+  return item.entry_type === 'income' ? Number(item.amount) : -Number(item.amount)
+}
+
+function paintGroup (el, rows) {
+  if (!rows.length) {
+    el.innerHTML = '<p class="empty">Niets gepland.</p>'
+    return
+  }
+  el.innerHTML = rows.map((item) => `
+    <button type="button" class="row" data-id="${item.id}">
+      <span>
+        <span class="name">${escapeHtml(item.description)}</span>
+        <span class="meta">${formatDay(item.date)}${item.recurring_id ? ' · terugkerend' : ''}</span>
+      </span>
+      <span class="money">${formatMoney(signedAmount(item))}</span>
+    </button>
+  `).join('')
+  el.querySelectorAll('[data-id]').forEach((btn) => {
+    btn.addEventListener('click', () => openItem(btn.dataset.id))
+  })
+}
+
+function openItem (id) {
+  const item = items.find((row) => row.id === id)
+  if (!item) return
+  field('id').value = item.id
+  field('description').value = item.description || ''
+  field('amount').value = String(item.amount ?? '').replace('.', ',')
+  field('date').value = String(item.date).slice(0, 10)
+  showMsg(msg, '', 'ok')
+  form.hidden = false
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function paint () {
+  paintGroup(document.getElementById('expenses'), items.filter((row) => row.entry_type === 'expense'))
+  paintGroup(document.getElementById('income'), items.filter((row) => row.entry_type === 'income'))
+}
+
+async function load () {
+  const { data, error } = await sb.from('finance_planned_transactions')
+    .select('*')
+    .eq('status', 'pending')
+    .order('date')
+  if (error) throw error
+  items = data || []
+  paint()
+}
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const id = field('id').value
+  const description = field('description').value.trim()
+  const amount = parseAmount(field('amount').value)
+  const date = field('date').value
+  if (!description) return showMsg(msg, 'Geef de rekening een naam.')
+  if (amount == null || amount <= 0) return showMsg(msg, 'Vul een bedrag in.')
+  if (!date) return showMsg(msg, 'Kies een datum.')
+  const { error } = await sb.from('finance_planned_transactions').update({
+    description,
+    amount,
+    date,
+    updated_at: new Date().toISOString()
+  }).eq('id', id)
+  if (error) return showMsg(msg, 'Opslaan lukte niet.')
+  showMsg(msg, 'Bewaard.', 'ok')
+  await load()
+  form.hidden = true
+})
+
+document.getElementById('cancel').addEventListener('click', () => { form.hidden = true })
+
+document.getElementById('pay').addEventListener('click', async () => {
+  const id = field('id').value
+  const { error } = await sb.rpc('finance_mark_planned_paid', { planned_id: id })
+  if (error) return showMsg(msg, 'Dit kon niet worden afgevinkt.')
+  form.hidden = true
+  await load()
+})
+
+document.getElementById('skip').addEventListener('click', async () => {
+  const id = field('id').value
+  const { error } = await sb.from('finance_planned_transactions').update({
+    status: 'skipped',
+    updated_at: new Date().toISOString()
+  }).eq('id', id)
+  if (error) return showMsg(msg, 'Overslaan lukte niet.')
+  form.hidden = true
+  await load()
+})
+
+try {
+  await load()
+} catch {
+  document.getElementById('expenses').innerHTML = '<p class="err">Aankomende rekeningen konden niet worden geladen.</p>'
+}
+</script>
+</body>
+</html>

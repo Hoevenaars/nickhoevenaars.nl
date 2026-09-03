@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test lib/*.test.js"
+    "test": "node --test lib/*.test.js finance-ui/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1"
