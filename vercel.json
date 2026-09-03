@@ -1,7 +1,19 @@
 {
   "rewrites": [
     { "source": "/admin", "destination": "/admin/index.html" },
-    { "source": "/admin/", "destination": "/admin/index.html" }
+    { "source": "/admin/", "destination": "/admin/index.html" },
+    {
+      "source": "/finance",
+      "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance"
+    },
+    {
+      "source": "/finance/",
+      "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance"
+    },
+    {
+      "source": "/finance/:path*",
+      "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance/:path*"
+    }
   ],
   "headers": [
     {
