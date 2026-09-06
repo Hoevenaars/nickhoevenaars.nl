@@ -24,7 +24,7 @@
 <div class="wrap">
   <p class="brand">Fluweel</p>
   <h1>Mijn rekeningen</h1>
-  <p class="lead">Tik een rekening aan om naam, type of saldo aan te passen.</p>
+  <p class="lead">Tik op een rekening om de naam of het saldo te zetten.</p>
   <div id="list" class="card"></div>
   <form id="form" class="card" hidden>
     <input type="hidden" name="id">
@@ -90,7 +90,7 @@ function closeForm () {
 
 function paint () {
   if (!accounts.length) {
-    list.innerHTML = '<p class="empty">Nog geen rekeningen.</p>'
+    list.innerHTML = '<p class="empty">Nog geen rekening. Tik op + Rekening toevoegen.</p>'
     return
   }
   list.innerHTML = accounts.map((account) => `

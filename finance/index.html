@@ -22,85 +22,158 @@
 </head>
 <body class="home">
 <header class="hero">
-  <p class="hero-hello">Welkom terug</p>
-  <h1 id="hello-name">…</h1>
+  <p class="hero-hello" id="hello">Welkom terug</p>
+  <h1 id="hello-name">Welkom terug</h1>
   <p class="hero-period" id="period"></p>
   <div class="hero-stats">
-    <div class="hero-stat"><span>Inkomsten</span><strong id="income">€0</strong></div>
-    <div class="hero-stat"><span>Uitgaven</span><strong id="expense">€0</strong></div>
+    <div class="hero-stat"><span>Binnen</span><strong id="income">€0</strong></div>
+    <div class="hero-stat"><span>Uit</span><strong id="expense">€0</strong></div>
   </div>
+  <p class="hero-note">Dit is deze maand, ook wat er nog aankomt.</p>
 </header>
 <div class="wrap">
   <section class="metrics">
-    <article class="metric">
+    <a class="metric" href="/finance/budget">
       <div class="metric-icon green" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 14c2.5-1 4.5-5 8-5s5.5 4 8 5"/><path d="M4 19h16"/></svg>
       </div>
-      <label>Resultaat</label>
+      <label>Over</label>
       <b id="result">€0</b>
-    </article>
-    <article class="metric">
+    </a>
+    <a class="metric" href="/finance/accounts">
       <div class="metric-icon gold" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 8h10l1 11H6L7 8z"/><path d="M9 8V7a3 3 0 0 1 6 0v1"/><circle cx="12" cy="14" r="1.4"/></svg>
       </div>
-      <label>Vermogen</label>
+      <label>Op je rekeningen</label>
       <b id="worth">€0</b>
-    </article>
-    <article class="metric">
+    </a>
+    <a class="metric" href="/finance/budget">
       <div class="metric-icon rose" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>
       </div>
-      <label>Vaste lasten</label>
+      <label>Elke maand vast</label>
       <b id="fixed">€0</b>
-    </article>
-    <article class="metric">
+    </a>
+    <a class="metric" href="/finance/goals">
       <div class="metric-icon orange" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2"/></svg>
       </div>
       <label>Spaardoelen</label>
-      <b id="goals">0</b>
-    </article>
+      <b id="goals">Nog geen</b>
+    </a>
   </section>
 
-  <p class="section-label">Saldo van je rekeningen</p>
+  <p class="section-label">Je rekeningen</p>
   <section class="card" id="accounts"></section>
   <a class="add-link" href="/finance/accounts">+ Rekening toevoegen</a>
 
-  <p class="section-label">Top uitgaven</p>
+  <p class="section-label">Waar ging het geld heen</p>
   <section class="card" id="top"></section>
 </div>
-<a class="fab" href="/finance/transactions" aria-label="Nieuwe transactie">
+<button type="button" class="fab" id="fab" aria-label="Iets toevoegen">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-</a>
+</button>
+<div class="sheet" id="sheet" hidden>
+  <button type="button" class="sheet-backdrop" id="sheet-close" aria-label="Sluiten"></button>
+  <div class="sheet-card">
+    <p class="sheet-title" id="sheet-title">Wat is er gebeurd?</p>
+    <div id="sheet-empty" hidden>
+      <p class="empty">Eerst een rekening, dan kun je geld zetten.<br><a href="/finance/accounts">Rekening toevoegen</a></p>
+    </div>
+    <form id="add-form">
+      <div class="choice" role="group" aria-label="Soort">
+        <button type="button" class="on" data-type="expense">Ik gaf uit</button>
+        <button type="button" data-type="income">Ik kreeg</button>
+      </div>
+      <label>Bedrag
+        <input name="amount" inputmode="decimal" placeholder="12,50" required>
+      </label>
+      <label>Waarvoor
+        <input name="description" placeholder="Bijv. boodschappen" required>
+      </label>
+      <label>Rekening
+        <select name="account_id" required></select>
+      </label>
+      <label>Soort
+        <select name="category_id"></select>
+      </label>
+      <label>Wanneer
+        <input name="date" type="date" required>
+      </label>
+      <p id="add-msg" hidden></p>
+      <div class="actions">
+        <button type="submit">Zet in je overzicht</button>
+        <button type="button" class="secondary" id="sheet-cancel">Terug</button>
+      </div>
+    </form>
+  </div>
+</div>
 <script type="module">
 import {
-  createSb, requireUser, mountNav, escapeHtml, formatMoney, accountBalance,
-  periodRange, formatPeriod, periodTotals, netWorth, fixedCosts, topExpenses, displayName
+  createSb, requireUser, mountNav, escapeHtml, showMsg, parseAmount, formatMoney, accountBalance,
+  periodRange, periodTitle, periodTotals, netWorth, fixedCosts, topExpenses,
+  displayName, goalsLabel, isoDate
 } from '/finance-ui/app.js'
 
 mountNav('home')
 const sb = createSb()
 const user = await requireUser(sb)
 
-function paintAccounts (accounts, transactions) {
-  const el = document.getElementById('accounts')
+const sheet = document.getElementById('sheet')
+const addForm = document.getElementById('add-form')
+let entryType = 'expense'
+let accounts = []
+let categories = []
+
+function field (name) { return addForm.elements[name] }
+
+function openSheet () {
+  sheet.hidden = false
   const live = accounts.filter((account) => !account.is_archived)
+  document.getElementById('sheet-empty').hidden = live.length > 0
+  addForm.hidden = live.length === 0
+  if (!live.length) return
+  field('date').value = isoDate(new Date())
+  field('amount').value = ''
+  field('description').value = ''
+  showMsg(document.getElementById('add-msg'), '', 'ok')
+  paintAccountChoices(live)
+  paintCategoryChoices()
+  field('amount').focus()
+}
+
+function closeSheet () { sheet.hidden = true }
+
+function paintAccountChoices (live) {
+  field('account_id').innerHTML = live.map((account) =>
+    `<option value="${account.id}">${escapeHtml(account.name)}</option>`
+  ).join('')
+}
+
+function paintCategoryChoices () {
+  const rows = categories.filter((cat) => !cat.is_archived && (cat.kind === entryType || cat.kind === 'savings'))
+  field('category_id').innerHTML = '<option value="">Niet nodig</option>' + rows.map((cat) =>
+    `<option value="${cat.id}">${escapeHtml(cat.name)}</option>`
+  ).join('')
+}
+
+function paintAccounts (list, transactions) {
+  const el = document.getElementById('accounts')
+  const live = list.filter((account) => !account.is_archived)
   if (!live.length) {
-    el.innerHTML = '<p class="empty">Nog geen rekeningen.</p>'
+    el.innerHTML = '<p class="empty">Nog geen rekening. <a href="/finance/accounts">Zet je eerste rekening</a>, dan zie je hier je saldo.</p>'
     return
   }
-  const rows = live.map((account) => {
+  el.innerHTML = live.map((account) => {
     const balance = accountBalance(account, transactions)
-    return `<div class="row" role="listitem"><span class="name">${escapeHtml(account.name)}</span><span class="money">${formatMoney(balance)}</span></div>`
-  })
-  rows.push(`<div class="row total-row"><span class="name">Totaal</span><span class="money">${formatMoney(netWorth(live, transactions))}</span></div>`)
-  el.innerHTML = rows.join('')
+    return `<a class="row" href="/finance/accounts"><span class="name">${escapeHtml(account.name)}</span><span class="money">${formatMoney(balance)}</span></a>`
+  }).join('') + `<div class="row total-row"><span class="name">Totaal</span><span class="money">${formatMoney(netWorth(live, transactions))}</span></div>`
 }
 
 function paintBars (rows) {
   const el = document.getElementById('top')
   if (!rows.length) {
-    el.innerHTML = '<p class="empty">Nog geen uitgaven deze periode.</p>'
+    el.innerHTML = '<p class="empty">Nog niets uitgegeven. Tik op <b>+</b> rechtsonder om een uitgave te zetten.</p>'
     return
   }
   el.innerHTML = `<div class="bars">${rows.map((row) => `
@@ -112,14 +185,14 @@ function paintBars (rows) {
   `).join('')}</div>`
 }
 
-try {
+async function load () {
   const [
     settingsRes, accountsRes, txRes, catsRes, goalsRes, recRes, plannedRes
   ] = await Promise.all([
     sb.from('finance_settings').select('*').maybeSingle(),
     sb.from('finance_accounts').select('*').eq('is_archived', false).order('sort_order'),
     sb.from('finance_transactions').select('id, account_id, counterparty_account_id, category_id, entry_type, amount, date'),
-    sb.from('finance_categories').select('id, name, color, kind'),
+    sb.from('finance_categories').select('id, name, color, kind, is_archived'),
     sb.from('finance_goals').select('id'),
     sb.from('finance_recurring_transactions').select('amount, entry_type, frequency, interval_count, is_active'),
     sb.from('finance_planned_transactions').select('category_id, entry_type, amount, date, status, description')
@@ -128,24 +201,77 @@ try {
   if (error) throw error
 
   const settings = settingsRes.data
-  const accounts = accountsRes.data || []
+  accounts = accountsRes.data || []
+  categories = catsRes.data || []
   const transactions = txRes.data || []
   const period = periodRange(new Date(), settings?.month_start_day || 1)
   const totals = periodTotals(transactions, plannedRes.data || [], period.startIso, period.endIso)
-  const worth = netWorth(accounts, transactions)
+  const name = displayName(user, settings)
+  const hello = document.getElementById('hello')
+  const title = document.getElementById('hello-name')
   const resultEl = document.getElementById('result')
 
-  document.getElementById('hello-name').textContent = displayName(user, settings)
-  document.getElementById('period').textContent = formatPeriod(period.start, period.end)
+  if (name) {
+    hello.hidden = false
+    title.textContent = name
+    title.classList.remove('solo')
+  } else {
+    hello.hidden = true
+    title.textContent = 'Welkom terug'
+    title.classList.add('solo')
+  }
+  document.getElementById('period').textContent = periodTitle(period.start, period.end)
   document.getElementById('income').textContent = formatMoney(totals.income)
   document.getElementById('expense').textContent = formatMoney(totals.expense)
   resultEl.textContent = formatMoney(totals.result, { signed: true })
   resultEl.classList.toggle('up', totals.result > 0)
-  document.getElementById('worth').textContent = formatMoney(worth)
-  document.getElementById('fixed').textContent = formatMoney(fixedCosts(recRes.data || []))
-  document.getElementById('goals').textContent = String((goalsRes.data || []).length)
+  resultEl.classList.toggle('down', totals.result < 0)
+  document.getElementById('worth').innerHTML = formatMoney(netWorth(accounts, transactions))
+  document.getElementById('fixed').innerHTML = `${formatMoney(fixedCosts(recRes.data || []))}<span class="per">/ mnd</span>`
+  document.getElementById('goals').textContent = goalsLabel((goalsRes.data || []).length)
   paintAccounts(accounts, transactions)
-  paintBars(topExpenses(transactions, plannedRes.data || [], catsRes.data || [], period.startIso, period.endIso))
+  paintBars(topExpenses(transactions, plannedRes.data || [], categories, period.startIso, period.endIso))
+}
+
+document.getElementById('fab').addEventListener('click', openSheet)
+document.getElementById('sheet-close').addEventListener('click', closeSheet)
+document.getElementById('sheet-cancel').addEventListener('click', closeSheet)
+
+addForm.querySelectorAll('[data-type]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    entryType = btn.dataset.type
+    addForm.querySelectorAll('[data-type]').forEach((item) => item.classList.toggle('on', item === btn))
+    paintCategoryChoices()
+  })
+})
+
+addForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const amount = parseAmount(field('amount').value)
+  const description = field('description').value.trim()
+  const accountId = field('account_id').value
+  const categoryId = field('category_id').value || null
+  const date = field('date').value
+  const msg = document.getElementById('add-msg')
+  if (!description) return showMsg(msg, 'Zeg even waarvoor het was.')
+  if (amount == null || amount <= 0) return showMsg(msg, 'Vul een bedrag in.')
+  if (!accountId) return showMsg(msg, 'Kies een rekening.')
+  const { error } = await sb.from('finance_transactions').insert({
+    user_id: user.id,
+    account_id: accountId,
+    category_id: categoryId,
+    entry_type: entryType,
+    amount,
+    date,
+    description
+  })
+  if (error) return showMsg(msg, 'Opslaan lukte niet.')
+  closeSheet()
+  await load()
+})
+
+try {
+  await load()
 } catch {
   document.getElementById('accounts').innerHTML = '<p class="err">Overzicht kon niet worden geladen.</p>'
 }

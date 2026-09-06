@@ -83,6 +83,21 @@ export function formatPeriod (start, end) {
   return `${left} – ${right}`
 }
 
+export function periodTitle (start, end) {
+  const next = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1)
+  if (start.getDate() === 1 && next.getDate() === 1) {
+    const label = new Intl.DateTimeFormat('nl-NL', { month: 'long', year: 'numeric' }).format(start)
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }
+  return formatPeriod(start, end)
+}
+
+export function goalsLabel (count) {
+  const n = Number(count) || 0
+  if (n <= 0) return 'Nog geen'
+  return String(n)
+}
+
 export function inPeriod (iso, startIso, endIso) {
   const day = String(iso || '').slice(0, 10)
   return day >= startIso && day <= endIso
@@ -163,8 +178,5 @@ export function displayName (user, settings) {
   const fromSettings = String(settings?.display_name || '').trim()
   if (fromSettings) return fromSettings
   const meta = user?.user_metadata || {}
-  const fromMeta = String(meta.full_name || meta.name || '').trim()
-  if (fromMeta) return fromMeta
-  const email = String(user?.email || '').split('@')[0]
-  return email || 'daar'
+  return String(meta.full_name || meta.name || '').trim()
 }

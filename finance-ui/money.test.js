@@ -7,11 +7,13 @@ import {
   accountTypeLabel,
   periodRange,
   formatPeriod,
+  periodTitle,
   periodTotals,
   netWorth,
   fixedCosts,
   topExpenses,
   displayName,
+  goalsLabel,
   isoDate
 } from './money.js'
 
@@ -59,6 +61,7 @@ test('periodRange starts on the 1st when that is the cycle day', () => {
   const range = periodRange(new Date(2026, 8, 6), 1)
   assert.equal(range.startIso, '2026-09-01')
   assert.equal(range.endIso, '2026-09-30')
+  assert.equal(periodTitle(range.start, range.end), 'september 2026'.replace(/^./, (c) => c.toUpperCase()))
 })
 
 test('periodTotals combine booked and pending planned amounts', () => {
@@ -111,8 +114,13 @@ test('topExpenses ranks categories and scales bars to the largest', () => {
   assert.equal(rows[1].amount, 148)
 })
 
-test('displayName prefers settings then metadata', () => {
+test('displayName prefers a real name and stays empty otherwise', () => {
   assert.equal(displayName({ email: 'x@y.nl' }, { display_name: 'Marlot' }), 'Marlot')
   assert.equal(displayName({ email: 'x@y.nl', user_metadata: { full_name: 'Ada' } }, {}), 'Ada')
-  assert.equal(displayName({ email: 'nick@site.nl' }, {}), 'nick')
+  assert.equal(displayName({ email: 'nick@site.nl' }, {}), '')
+})
+
+test('goalsLabel is plain language for zero', () => {
+  assert.equal(goalsLabel(0), 'Nog geen')
+  assert.equal(goalsLabel(11), '11')
 })

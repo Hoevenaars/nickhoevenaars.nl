@@ -10,11 +10,13 @@ export {
   isoDate,
   periodRange,
   formatPeriod,
+  periodTitle,
   periodTotals,
   netWorth,
   fixedCosts,
   topExpenses,
-  displayName
+  displayName,
+  goalsLabel
 } from './money.js'
 
 const ICON = {
@@ -28,7 +30,7 @@ const ICON = {
 const NAV = [
   { id: 'home', href: '/finance/', label: 'Home', icon: ICON.home },
   { id: 'budget', href: '/finance/budget', label: 'Budget', icon: ICON.budget },
-  { id: 'inzicht', href: '/finance/transactions', label: 'Inzicht', icon: ICON.inzicht },
+  { id: 'inzicht', href: '/finance/transactions', label: 'In & uit', icon: ICON.inzicht },
   { id: 'sparen', href: '/finance/goals', label: 'Sparen', icon: ICON.sparen },
   { id: 'meer', href: '/finance/more', label: 'Meer', icon: ICON.meer }
 ]
