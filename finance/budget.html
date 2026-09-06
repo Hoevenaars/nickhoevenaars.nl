@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#F6F3EE">
-<title>Begroting · Fluweel</title>
+<meta name="theme-color" content="#93294E">
+<title>Budget · Fluweel</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/finance-ui/app.css">
 <script type="importmap">
 {
@@ -23,7 +23,7 @@
 <body>
 <div class="wrap">
   <p class="brand">Fluweel</p>
-  <h1>Begroting</h1>
+  <h1>Budget</h1>
   <p class="lead">Tik een aankomende rekening of inkomst aan om naam, bedrag of datum aan te passen.</p>
   <section class="card">
     <p class="meta" style="margin-bottom:.6rem">Nog te betalen</p>
@@ -55,17 +55,12 @@
     </div>
   </form>
 </div>
-<nav class="nav"><div class="inner">
-  <a href="/finance/">Home</a>
-  <a href="/finance/transactions">Transacties</a>
-  <a href="/finance/budget" class="active">Begroting</a>
-  <a href="/finance/goals">Doelen</a>
-</div></nav>
 <script type="module">
 import {
-  createSb, requireUser, parseAmount, formatMoney, formatDay, showMsg
+  createSb, requireUser, parseAmount, formatMoney, formatDay, showMsg, mountNav, escapeHtml
 } from '/finance-ui/app.js'
 
+mountNav('budget')
 const sb = createSb()
 await requireUser(sb)
 const form = document.getElementById('form')
@@ -73,12 +68,6 @@ const msg = document.getElementById('msg')
 let items = []
 
 function field (name) { return form.elements[name] }
-
-function escapeHtml (value) {
-  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[ch]))
-}
 
 function signedAmount (item) {
   return item.entry_type === 'income' ? Number(item.amount) : -Number(item.amount)
