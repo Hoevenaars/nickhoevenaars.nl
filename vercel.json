@@ -71,14 +71,8 @@
     { "source": "/finance/accounts/", "destination": "/finance/accounts.html" },
     { "source": "/finance/budget", "destination": "/finance/budget.html" },
     { "source": "/finance/budget/", "destination": "/finance/budget.html" },
-    {
-      "source": "/finance",
-      "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance"
-    },
-    {
-      "source": "/finance/",
-      "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance"
-    },
+    { "source": "/finance", "destination": "/finance/index.html" },
+    { "source": "/finance/", "destination": "/finance/index.html" },
     {
       "source": "/finance/:path*",
       "destination": "https://temporary-agile-perseus-ukwx3em.vercel.app/finance/:path*"
