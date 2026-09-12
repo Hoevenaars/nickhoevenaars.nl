@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/auth/staff";
 
 export async function PATCH(request: Request) {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
+  const staff = await requireStaff();
+  if ("error" in staff) return staff.error;
+  const { supabase } = staff;
 
   const body = await request.json().catch(() => ({}));
   const allowed = [

@@ -3,16 +3,21 @@
 Interne Next.js-app om een URL toe te voegen, te scannen en te beoordelen voor het standaard **Website Refresh**-product.
 
 Dit is **niet** Fluweel. Data staat in een eigen Supabase-project: `Website Refresh` (`exnprzhtxnxlrntlcsnh`).
+Er is nog geen klantlabel nodig; die kun je later elders ontwikkelen.
 
-## Wat V1 doet
+## Privé live zetten
 
-1. Prospect toevoegen via URL
-2. Website crawlen (max. 10 relevante pagina's)
-3. Findings opslaan als FACT / OBSERVATION / HYPOTHESIS
-4. Productfit en Opportunity Score berekenen met vaste regels
-5. Dashboard, lijst, detail, human review, interne preview
+Dit mag al in de lucht als **besloten interne URL**. Niet koppelen aan nickhoevenaars.nl, Fluweel of `/admin`.
 
-AI mag harde uitsluitingen (webshop, klantportaal, onbereikbaar, recente high-quality site) **niet** overrulen.
+1. Nieuw Vercel-project, root directory `refresh`.
+2. Env uit `.env.example`, plus `SUPABASE_SERVICE_ROLE_KEY` en `REFRESH_ALLOWED_EMAILS`.
+3. In Supabase Authentication:
+   - **Allow new users to sign up** uit.
+   - **Confirm email** uit.
+   - Zelf één user aanmaken (Add user) met het allowlist-adres.
+4. Vercel-URL nergens publiek linken. `robots.txt` blokkeert indexatie.
+
+OpenAI, Trigger.dev, Playwright en Lighthouse zijn **niet** nodig om privé te starten. Zonder OpenAI scoort de pipeline op crawl + regels. Lange scans kunnen op Vercel Hobby timeouten; lokaal of Pro is ruimer.
 
 ## Lokaal draaien
 
@@ -24,30 +29,8 @@ npm test
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), maak een intern account, plak een URL, klik **Add & Scan**.
-
-Zet in het Supabase-project **Authentication → Providers → Email** confirmations uit voor intern gebruik, of bevestig de eerste mail.
-
-## Verplichte env
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (workflows / storage; niet in de browser)
-- `OPENAI_API_KEY` (optioneel; zonder key draait de pipeline op regels + crawl)
-- `TRIGGER_SECRET_KEY` (productieachtergrondtaken)
-
-## Vercel
-
-Maak een **apart** Vercel-project met root directory `refresh`. Niet het bestaande nickhoevenaars.nl-project overschrijven.
-
-## Trigger.dev
-
-Zware stappen (Playwright, Lighthouse, retries) horen in Trigger.dev. De pipeline zit in `lib/pipeline/run.ts` en wordt nu vanuit API-routes aangeroepen zodat V1 zonder Trigger-account al scoort. Koppel later:
-
-- `workflows/scan-prospect.ts`
-- `workflows/analyse-prospect.ts`
-- `workflows/generate-preview.ts`
+Open [http://localhost:3000](http://localhost:3000) en log in met de user uit Supabase.
 
 ## Testdataset
 
-Zie `testdata/calibration.json`. Vul aan tot ~100 gelabelde sites voordat je opschaalt.
+Zie `testdata/calibration.json`.

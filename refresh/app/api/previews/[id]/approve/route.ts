@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/auth/staff";
 
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
+  const staff = await requireStaff();
+  if ("error" in staff) return staff.error;
+  const { supabase } = staff;
 
   const { error } = await supabase
     .from("previews")

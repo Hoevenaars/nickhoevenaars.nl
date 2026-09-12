@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/auth/staff";
 import { HUMAN_DECISIONS } from "@/types";
 import { humanDecisionToStatus } from "@/lib/scoring/status";
 import { logActivity, setProspectStatus } from "@/lib/activity";
@@ -13,11 +13,9 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
+  const staff = await requireStaff();
+  if ("error" in staff) return staff.error;
+  const { supabase, user } = staff;
 
   const body = await request.json().catch(() => ({}));
   const decision = body.decision as (typeof HUMAN_DECISIONS)[number];

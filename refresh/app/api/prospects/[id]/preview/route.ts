@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/auth/staff";
 import { generatePreviewWorkflow } from "@/workflows/generate-preview";
 
 export const runtime = "nodejs";
@@ -10,11 +10,9 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
+  const staff = await requireStaff();
+  if ("error" in staff) return staff.error;
+  const { supabase, user } = staff;
 
   try {
     const preview = await generatePreviewWorkflow(supabase, id, user.id);

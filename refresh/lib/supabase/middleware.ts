@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isAllowedEmail } from "@/lib/auth/allowlist";
 
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -27,7 +28,14 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic = path === "/login" || path.startsWith("/auth");
+  const isPublic = path === "/login" || path.startsWith("/auth") || path === "/robots.txt";
+  if (user && !isAllowedEmail(user.email)) {
+    await supabase.auth.signOut();
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/login";
+    redirect.searchParams.set("error", "forbidden");
+    return NextResponse.redirect(redirect);
+  }
   if (!user && !isPublic) {
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";

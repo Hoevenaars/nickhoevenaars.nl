@@ -8,10 +8,12 @@ export default function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/dashboard";
+  const forbidden = params.get("error") === "forbidden";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"in" | "up">("in");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    forbidden ? "Dit account heeft geen toegang tot Refresh." : null,
+  );
   const [pending, setPending] = useState(false);
 
   async function submit(event: React.FormEvent) {
@@ -19,11 +21,7 @@ export default function LoginForm() {
     setPending(true);
     setError(null);
     const supabase = createBrowserSupabase();
-    const action =
-      mode === "in"
-        ? supabase.auth.signInWithPassword({ email, password })
-        : supabase.auth.signUp({ email, password });
-    const { error: authError } = await action;
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     setPending(false);
     if (authError) {
       setError(authError.message);
@@ -43,6 +41,7 @@ export default function LoginForm() {
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           required
+          autoComplete="username"
         />
       </label>
       <label className="block text-sm">
@@ -54,6 +53,7 @@ export default function LoginForm() {
           onChange={(event) => setPassword(event.target.value)}
           required
           minLength={8}
+          autoComplete="current-password"
         />
       </label>
       {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
@@ -62,14 +62,7 @@ export default function LoginForm() {
         disabled={pending}
         type="submit"
       >
-        {pending ? "Bezig…" : mode === "in" ? "Inloggen" : "Account maken"}
-      </button>
-      <button
-        type="button"
-        className="w-full text-sm text-[#6a6573]"
-        onClick={() => setMode(mode === "in" ? "up" : "in")}
-      >
-        {mode === "in" ? "Eerste keer? Maak een intern account" : "Heb je al een account? Log in"}
+        {pending ? "Bezig…" : "Inloggen"}
       </button>
     </form>
   );

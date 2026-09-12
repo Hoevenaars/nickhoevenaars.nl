@@ -10,7 +10,8 @@ export default function LoginPage() {
         </p>
         <h1 className="mt-2 font-[var(--font-display)] text-3xl font-bold">Website intake</h1>
         <p className="mt-2 text-sm text-[#6a6573]">
-          Intern dashboard om prospects te scannen en te beoordelen. Niet voor klanten.
+          Privé intake-omgeving. Geen publieke inschrijving, geen link vanaf de website.
+          Alleen uitgenodigde accounts komen erin.
         </p>
         <div className="mt-6">
           <Suspense>

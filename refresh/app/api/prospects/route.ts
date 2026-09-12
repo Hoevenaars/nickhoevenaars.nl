@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/auth/staff";
 import { normalizeWebsiteUrl, UrlValidationError } from "@/lib/validation/url";
 import { runProspectPipeline } from "@/lib/pipeline/run";
 import { logActivity } from "@/lib/activity";
@@ -8,11 +8,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  const supabase = await createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
+  const staff = await requireStaff();
+  if ("error" in staff) return staff.error;
+  const { supabase, user } = staff;
 
   const body = await request.json().catch(() => ({}));
   const websiteUrl = String(body.websiteUrl ?? body.website_url ?? "");
