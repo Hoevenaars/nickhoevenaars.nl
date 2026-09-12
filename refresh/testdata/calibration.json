@@ -1,0 +1,12 @@
+{
+  "description": "Kalibratieset voor Opportunity Score vs menselijk oordeel. Verdeel ~100 sites: 25 slecht+interessant, 25 slecht+waardeloos, 25 gemiddeld, 25 modern.",
+  "human_labels": ["reject", "watchlist", "sales_ready", "priority"],
+  "sites": [
+    {
+      "url": "https://example.com",
+      "bucket": "modern_professional",
+      "human_label": "reject",
+      "notes": "Placeholder. Vervang door echte sites."
+    }
+  ]
+}
