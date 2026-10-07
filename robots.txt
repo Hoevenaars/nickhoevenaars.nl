@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /admin
+Disallow: /finance
+Disallow: /api
+Disallow: /CNAME
+
+Sitemap: https://www.nickhoevenaars.nl/sitemap.xml
